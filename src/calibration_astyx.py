@@ -32,19 +32,20 @@ def get_objects_lidar(objects, T_toLidar):
     for obj in objects:
         obj_lidar = np.dot(T_toLidar[0:3, 0:3], np.transpose(obj))
         T = T_toLidar[0:3, 3]
-        obj_lidar = obj_lidar + T[:, np.newaxis]
+        obj_lidar = obj_lidar + T
         obj_lidar = np.transpose(obj_lidar)
         objects_lidar.append(obj_lidar)
-    return objects_lidar
+    return np.array(objects_lidar)
 
 
 def get_rot_lidar(orient, T_toLidar):
     rot_lidar = []
     for k in orient:
         T = object3d_astyx.quat_to_rotation(k)
-        T = np.dot(T_toLidar, T)
+        T = np.dot(T_toLidar[:,0:3], T)
         rot = math.atan2(T[1,0], T[0,0])
         # rot = math.atan2(-T[2,0], np.sqrt(T[2,0]*T[2,0], T[2,2]*T[2,2]))
         # rot = math.atan2(T[2,1], T[2,2])
         rot_lidar.append(rot)
-    return rot_lidar
+    rot_lidar = np.array(rot_lidar)
+    return rot_lidar[:, np.newaxis]
