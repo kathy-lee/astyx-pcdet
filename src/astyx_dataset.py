@@ -4,11 +4,10 @@ import pickle
 import numpy as np
 from skimage import io
 
-import sys
-sys.path.insert(1, '../OpenPCDet/pcdet')
-from ops.roiaware_pool3d import roiaware_pool3d_utils
-from utils import box_utils, common_utils, object3d_astyx, calibration_astyx
-from datasets.dataset import DatasetTemplate
+from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
+from pcdet.utils import box_utils, common_utils
+import object3d_astyx, calibration_astyx
+from pcdet.datasets.dataset import DatasetTemplate
 
 
 class AstyxDataset(DatasetTemplate):
@@ -438,15 +437,15 @@ def create_astyx_infos(dataset_cfg, class_names, data_path, save_path, workers=4
 
 if __name__ == '__main__':
     import sys
-    if sys.argv.__len__() > 1 and sys.argv[1] == 'create_kitti_infos':
+    if sys.argv.__len__() > 1 and sys.argv[1] == 'create_astyx_infos':
         import yaml
         from pathlib import Path
         from easydict import EasyDict
         dataset_cfg = EasyDict(yaml.load(open(sys.argv[2])))
-        ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()
+        ROOT_DIR = (Path(__file__).resolve().parent / '../').resolve()
         create_astyx_infos(
             dataset_cfg=dataset_cfg,
             class_names=['Car', 'Pedestrian', 'Cyclist'],
-            data_path=ROOT_DIR / 'data' / 'kitti',
-            save_path=ROOT_DIR / 'data' / 'kitti'
+            data_path=ROOT_DIR / 'data',
+            save_path=ROOT_DIR / 'data'
         )
