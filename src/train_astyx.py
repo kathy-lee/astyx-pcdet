@@ -3,7 +3,7 @@ import datetime
 import glob
 import os
 from pathlib import Path
-from test import repeat_eval_ckpt
+from test_astyx import repeat_eval_ckpt
 
 import torch
 import torch.distributed as dist
