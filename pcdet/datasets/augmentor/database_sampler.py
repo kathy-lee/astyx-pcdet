@@ -121,11 +121,11 @@ class DataBaseSampler(object):
         gt_names = data_dict['gt_names'][gt_boxes_mask]
         points = data_dict['points']
         if self.sampler_cfg.get('USE_ROAD_PLANE', False):
-            sampled_gt_boxes, mv_height = self.put_boxes_on_road_planes(
-                sampled_gt_boxes, data_dict['road_plane'], data_dict['calib']
-            )
+            # sampled_gt_boxes, mv_height = self.put_boxes_on_road_planes(
+            #     sampled_gt_boxes, data_dict['road_plane'], data_dict['calib']
+            # )
             data_dict.pop('calib')
-            data_dict.pop('road_plane')
+            # data_dict.pop('road_plane')
 
         obj_points_list = []
         for idx, info in enumerate(total_valid_sampled_dict):
