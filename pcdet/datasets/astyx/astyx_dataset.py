@@ -153,7 +153,7 @@ class AstyxDataset(DatasetTemplate):
                 # annotations['rotation_y'] = np.array([obj.ry for obj in obj_list])
                 annotations['orientation'] = np.array([obj.orient for obj in obj_list])
                 annotations['score'] = np.array([obj.score for obj in obj_list])
-                # annotations['difficulty'] = np.array([obj.level for obj in obj_list], np.int32)
+                annotations['difficulty'] = np.array([obj.level for obj in obj_list], np.int32)
 
                 num_objects = len([obj.cls_type for obj in obj_list if obj.cls_type != 'DontCare'])
                 num_gt = len(annotations['name'])
@@ -216,7 +216,7 @@ class AstyxDataset(DatasetTemplate):
             points = self.get_lidar(sample_idx)
             annos = info['annos']
             names = annos['name']
-            # difficulty = annos['difficulty']
+            difficulty = annos['difficulty']
             # bbox = annos['bbox']
             gt_boxes = annos['gt_boxes_lidar']
 
@@ -241,7 +241,7 @@ class AstyxDataset(DatasetTemplate):
                     #            'difficulty': difficulty[i], 'bbox': bbox[i], 'score': annos['score'][i]}
                     db_info = {'name': names[i], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': i,
                                'box3d_lidar': gt_boxes[i], 'num_points_in_gt': gt_points.shape[0],
-                               'score': annos['score'][i]}
+                               'difficulty': difficulty, 'score': annos['score'][i]}
                     if names[i] in all_db_infos:
                         all_db_infos[names[i]].append(db_info)
                     else:
@@ -440,11 +440,11 @@ if __name__ == '__main__':
         import yaml
         from pathlib import Path
         from easydict import EasyDict
-        dataset_cfg = EasyDict(yaml.load(open(sys.argv[2])))
-        ROOT_DIR = (Path(__file__).resolve().parent / '../').resolve()
+        dataset_cfg = EasyDict(yaml.full_load(open(sys.argv[2])))
+        ROOT_DIR = (Path(__file__).resolve().parent / '../../../').resolve()
         create_astyx_infos(
             dataset_cfg=dataset_cfg,
             class_names=['Car', 'Pedestrian', 'Cyclist'],
-            data_path=ROOT_DIR / 'data',
-            save_path=ROOT_DIR / 'data'
+            data_path=ROOT_DIR / 'data' / 'astyx',
+            save_path=ROOT_DIR / 'data' / 'astyx'
         )
