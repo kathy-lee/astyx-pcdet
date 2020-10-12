@@ -13,14 +13,14 @@ INFO_PATH: {
     'test': [astyx_infos_val.pkl],
 }
 
-FOV_POINTS_ONLY: True
+FOV_POINTS_ONLY: False
 
 
 DATA_AUGMENTOR:
     DISABLE_AUG_LIST: ['placeholder']
     AUG_CONFIG_LIST:
         - NAME: gt_sampling
-          USE_ROAD_PLANE: True
+          USE_ROAD_PLANE: False
           DB_INFO_PATH:
               - astyx_dbinfos_train.pkl
           PREPARE: {
