@@ -65,15 +65,15 @@ class Object3d(object):
         self.level = self.get_astyx_obj_level()
 
     def get_astyx_obj_level(self):
-        height = float(self.box2d[3]) - float(self.box2d[1]) + 1
+        # height = float(self.box2d[3]) - float(self.box2d[1]) + 1
 
-        if height >= 40 and self.occlusion == 0:
+        if self.occlusion == 0:
             self.level_str = 'Easy'
             return 0  # Easy
-        elif height >= 25 and self.occlusion == 1:
+        elif self.occlusion == 1:
             self.level_str = 'Moderate'
             return 1  # Moderate
-        elif height >= 25 and self.occlusion >= 2:
+        elif self.occlusion >= 2:
             self.level_str = 'Hard'
             return 2  # Hard
         else:
