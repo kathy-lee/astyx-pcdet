@@ -241,7 +241,7 @@ class AstyxDataset(DatasetTemplate):
                     #            'difficulty': difficulty[i], 'bbox': bbox[i], 'score': annos['score'][i]}
                     db_info = {'name': names[i], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': i,
                                'box3d_lidar': gt_boxes[i], 'num_points_in_gt': gt_points.shape[0],
-                               'difficulty': difficulty, 'score': annos['score'][i]}
+                               'difficulty': difficulty[i], 'score': annos['score'][i]}
                     if names[i] in all_db_infos:
                         all_db_infos[names[i]].append(db_info)
                     else:
