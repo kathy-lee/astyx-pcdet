@@ -4,10 +4,9 @@ import pickle
 import numpy as np
 from skimage import io
 
-from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
-from pcdet.utils import box_utils, common_utils
-import object3d_astyx, calibration_astyx
-from pcdet.datasets.dataset import DatasetTemplate
+from ...ops.roiaware_pool3d import roiaware_pool3d_utils
+from ...utils import box_utils, common_utils, object3d_astyx, calibration_astyx
+from ..dataset import DatasetTemplate
 
 
 class AstyxDataset(DatasetTemplate):
