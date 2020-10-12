@@ -1,7 +1,7 @@
 import numpy as np
 import json
 import math
-import object3d_astyx
+from . object3d_astyx import quat_to_rotation
 
 def inv_trans(T):
     rotation = np.linalg.inv(T[0:3, 0:3])  # rotation matrix
@@ -41,7 +41,7 @@ def get_objects_lidar(objects, T_toLidar):
 def get_rot_lidar(orient, T_toLidar):
     rot_lidar = []
     for k in orient:
-        T = object3d_astyx.quat_to_rotation(k)
+        T = quat_to_rotation(k)
         T = np.dot(T_toLidar[:,0:3], T)
         rot = math.atan2(T[1,0], T[0,0])
         # rot = math.atan2(-T[2,0], np.sqrt(T[2,0]*T[2,0], T[2,2]*T[2,2]))
