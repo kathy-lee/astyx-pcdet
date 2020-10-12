@@ -10,7 +10,7 @@ def get_objects_from_label(label_file):
 
 
 def cls_type_to_id(cls_type):
-    type_to_id = {'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Person': 4, 'Trailer': 5, 'Truck': 6,
+    type_to_id = {'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
                'Towed Object': 5, 'Other Vehicle': 5}
     if cls_type not in type_to_id.keys():
         return -1
@@ -45,7 +45,7 @@ class Object3d(object):
         # label = line.strip().split(' ')
         # self.src = line
         # self.cls_type = label[0]
-        self.cls_type = dict['classname']
+        self.cls_type = dict['classname'] if dict['classname']!='Person' else 'Pedestrian'
         self.cls_id = cls_type_to_id(self.cls_type)
         # self.truncation = float(label[1])
         self.occlusion = float(dict['occlusion'])# 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
@@ -62,18 +62,18 @@ class Object3d(object):
         # self.score = float(label[15]) if label.__len__() == 16 else -1.0
         self.score = float(dict['score'])
         self.level_str = None
-        # self.level = self.get_astyx_obj_level()
+        self.level = self.get_astyx_obj_level()
 
     def get_astyx_obj_level(self):
         height = float(self.box2d[3]) - float(self.box2d[1]) + 1
 
-        if height >= 40 and self.occlusion <= 0:
+        if height >= 40 and self.occlusion == 0:
             self.level_str = 'Easy'
             return 0  # Easy
-        elif height >= 25 and self.occlusion <= 1:
+        elif height >= 25 and self.occlusion == 1:
             self.level_str = 'Moderate'
             return 1  # Moderate
-        elif height >= 25 and self.occlusion <= 2:
+        elif height >= 25 and self.occlusion >= 2:
             self.level_str = 'Hard'
             return 2  # Hard
         else:
