@@ -288,8 +288,12 @@ class AstyxDataset(DatasetTemplate):
 
             calib = batch_dict['calib'][batch_index]
             image_shape = batch_dict['image_shape'][batch_index]
-            pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
-            pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
+            # pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
+            pred_boxes_camera = calibration_astyx.boxes_lidar_to_astyx_camera(pred_boxes, calib)
+            # pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
+            #     pred_boxes_camera, calib, image_shape=image_shape
+            # )
+            pred_boxes_img = calibration_astyx.boxes3d_camera_to_astyx_imageboxes(
                 pred_boxes_camera, calib, image_shape=image_shape
             )
 

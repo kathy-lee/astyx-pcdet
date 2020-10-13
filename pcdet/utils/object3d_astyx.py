@@ -1,5 +1,6 @@
 import numpy as np
 import json
+from . calibration_astyx import quat_to_rotation
 
 
 def get_objects_from_label(label_file):
@@ -15,29 +16,6 @@ def cls_type_to_id(cls_type):
     if cls_type not in type_to_id.keys():
         return -1
     return type_to_id[cls_type]
-
-
-def quat_to_rotation(quat):
-    m = np.sum(np.multiply(quat, quat))
-    q = quat.copy()
-    q = np.array(q)
-    n = np.dot(q, q)
-    if n < np.finfo(q.dtype).eps:
-        rot_matrix = np.identity(4)
-        return rot_matrix
-    q = q * np.sqrt(2.0 / n)
-    q = np.outer(q, q)
-    rot_matrix = np.array(
-        [[1.0 - q[2, 2] - q[3, 3], q[1, 2] + q[3, 0], q[1, 3] - q[2, 0]],
-         [q[1, 2] - q[3, 0], 1.0 - q[1, 1] - q[3, 3], q[2, 3] + q[1, 0]],
-         [q[1, 3] + q[2, 0], q[2, 3] - q[1, 0], 1.0 - q[1, 1] - q[2, 2]]],
-        dtype=q.dtype)
-    rot_matrix = np.transpose(rot_matrix)
-    # # test if it is truly a rotation matrix
-    # d = np.linalg.det(rotation)
-    # t = np.transpose(rotation)
-    # o = np.dot(rotation, t)
-    return rot_matrix
 
 
 class Object3d(object):
