@@ -135,9 +135,9 @@ class DataBaseSampler(object):
 
             obj_points[:, :3] += info['box3d_lidar'][:3]
 
-            if self.sampler_cfg.get('USE_ROAD_PLANE', False):
+            # if self.sampler_cfg.get('USE_ROAD_PLANE', False):
                 # mv height
-                obj_points[:, 2] -= mv_height[idx]
+                # obj_points[:, 2] -= mv_height[idx]
 
             obj_points_list.append(obj_points)
 
