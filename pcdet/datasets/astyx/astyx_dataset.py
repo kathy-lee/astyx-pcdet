@@ -142,6 +142,7 @@ class AstyxDataset(DatasetTemplate):
 
             if has_label:
                 obj_list = self.get_label(sample_idx)
+                obj_list.convert_to_camera3d_obj()
                 annotations = {}
                 annotations['name'] = np.array([obj.cls_type for obj in obj_list])
                 # annotations['truncated'] = np.array([obj.truncation for obj in obj_list])
@@ -149,9 +150,8 @@ class AstyxDataset(DatasetTemplate):
                 # annotations['alpha'] = np.array([obj.alpha for obj in obj_list])
                 # annotations['bbox'] = np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0)
                 annotations['dimensions'] = np.array([[obj.l, obj.h, obj.w] for obj in obj_list])  # lhw(camera) format
-                annotations['location'] = np.concatenate([obj.loc.reshape(1, 3) for obj in obj_list], axis=0)
-                # annotations['rotation_y'] = np.array([obj.ry for obj in obj_list])
-                annotations['orientation'] = np.array([obj.orient for obj in obj_list])
+                annotations['location'] = np.concatenate([obj.loc_camera.reshape(1, 3) for obj in obj_list], axis=0)
+                annotations['rotation_y'] = np.array([obj.rot_camera for obj in obj_list])
                 annotations['score'] = np.array([obj.score for obj in obj_list])
                 annotations['difficulty'] = np.array([obj.level for obj in obj_list], np.int32)
 
@@ -160,17 +160,19 @@ class AstyxDataset(DatasetTemplate):
                 index = list(range(num_objects)) + [-1] * (num_gt - num_objects)
                 annotations['index'] = np.array(index, dtype=np.int32)
 
-                loc = annotations['location'][:num_objects]
-                dims = annotations['dimensions'][:num_objects]
-                # rots = annotations['rotation_y'][:num_objects]
-                orient = annotations['orientation'][:num_objects]
-                rot_lidar = calibration_astyx.get_rot_lidar(orient, calib['T_toLidar'])
-                # loc_lidar = calib.rect_to_lidar(loc)
-                loc_lidar = calibration_astyx.get_objects_lidar(loc, calib['T_toLidar'])
-                l, h, w = dims[:, 0:1], dims[:, 1:2], dims[:, 2:3]
-                # loc_lidar[:, 2] += h[:, 0] / 2
-                # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, -(np.pi / 2 + rots[..., np.newaxis])], axis=1)
-                gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
+                # loc = annotations['location'][:num_objects]
+                # dims = annotations['dimensions'][:num_objects]
+                # # rots = annotations['rotation_y'][:num_objects]
+                # orient = annotations['orientation'][:num_objects]
+                # rot_lidar = calibration_astyx.get_rot_lidar(orient, calib['T_toLidar'])
+                # # loc_lidar = calib.rect_to_lidar(loc)
+                # loc_lidar = calibration_astyx.get_objects_lidar(loc, calib['T_toLidar'])
+                # l, h, w = dims[:, 0:1], dims[:, 1:2], dims[:, 2:3]
+                # # loc_lidar[:, 2] += h[:, 0] / 2
+                # # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, -(np.pi / 2 + rots[..., np.newaxis])], axis=1)
+                # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
+                obj_list.convert_to_lidar_obj()
+                gt_boxes_lidar = np.array([[obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
                 info['annos'] = annotations
