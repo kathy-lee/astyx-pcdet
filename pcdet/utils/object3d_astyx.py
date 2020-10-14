@@ -12,31 +12,45 @@ def get_objects_from_label(label_file):
 
 
 class Object3dAstyx(object):
-    def __init__(self, dict):
-        self.src = dict
-        self.cls_type = dict['classname'] if dict['classname']!='Person' else 'Pedestrian'
+    def __init__(self, dimension3d,  score):
+        self.h = dimension3d[2]
+        self.w = dimension3d[0]
+        self.l = dimension3d[1]
+        self.score = score
+
+
+    @classmethod
+    def from_label(cls, dict):
+        obj = cls(dict['dimension3d'], dict['score'])
+        obj.src = dict
+        obj.cls_type = dict['classname'] if dict['classname'] != 'Person' else 'Pedestrian'
         cls_type_to_id = {
             'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
             'Towed Object': 5, 'Other Vehicle': 5
         }
-        self.cls_id = cls_type_to_id[self.cls_type]
+        obj.cls_id = cls_type_to_id[obj.cls_type]
         # self.truncation = float(label[1])
-        self.occlusion = float(dict['occlusion'])# 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
+        obj.occlusion = float(
+            dict['occlusion'])  # 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
         # self.alpha = float(label[3])
         # self.box2d = np.array((float(label[4]), float(label[5]), float(label[6]), float(label[7])), dtype=np.float32)
-        self.h = float(dict['dimension3d'][2])
-        self.w = float(dict['dimension3d'][0])
-        self.l = float(dict['dimension3d'][1])
         # self.loc = np.array((float(label[11]), float(label[12]), float(label[13])), dtype=np.float32)
-        self.loc = np.array(dict['center3d'])
+        obj.loc = np.array(dict['center3d'])
         # self.dis_to_cam = np.linalg.norm(self.loc)
         # self.ry = float(label[14])
-        self.orient = dict['orientation_quat']
+        obj.orient = dict['orientation_quat']
         # self.score = float(label[15]) if label.__len__() == 16 else -1.0
-        self.score = float(dict['score'])
-        self.level_str = None
-        self.level = self.get_astyx_obj_level()
+        obj.level_str = None
+        obj.level = obj.get_astyx_obj_level()
+        return obj
 
+    @classmethod
+    def from_prediction(cls, pred_dict):
+        obj = cls(pred_dict['pred_boxes']['dimension3d'], pred_dict['pred_scores'])
+        obj.cls_id = pred_dict['pred_labels']
+        obj.loc_lidar = pred_dict['pred_boxes'][:3]
+        obj.rot_lidar = pred_dict['pred_boxes'][-1]
+        return obj
 
     def get_astyx_obj_level(self):
         # height = float(self.box2d[3]) - float(self.box2d[1]) + 1
@@ -118,3 +132,5 @@ class Object3dAstyx(object):
         T = quat_to_rotation(self.orient)
         T = np.dot(calib['T_from_radar_to_lidar'][:, 0:3], T)
         self.rot_lidar = math.atan2(T[1, 0], T[0, 0])
+
+    def from_lidar_to_camera(self, calib):
