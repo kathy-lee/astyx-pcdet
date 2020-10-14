@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import math
 from . calibration_astyx import quat_to_rotation
 
 
@@ -10,19 +11,11 @@ def get_objects_from_label(label_file):
     return objects
 
 
-def cls_type_to_id(cls_type):
-    type_to_id = {'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
-               'Towed Object': 5, 'Other Vehicle': 5}
-    if cls_type not in type_to_id.keys():
-        return -1
-    return type_to_id[cls_type]
-
-
 class Object3dAstyx(object):
     def __init__(self, dict):
         self.src = dict
         self.cls_type = dict['classname'] if dict['classname']!='Person' else 'Pedestrian'
-        self.cls_id = cls_type_to_id(self.cls_type)
+        self.cls_id = cls_type_to_id()
         # self.truncation = float(label[1])
         self.occlusion = float(dict['occlusion'])# 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
         # self.alpha = float(label[3])
@@ -39,6 +32,13 @@ class Object3dAstyx(object):
         self.score = float(dict['score'])
         self.level_str = None
         self.level = self.get_astyx_obj_level()
+
+    def cls_type_to_id(self):
+        type_to_id = {'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
+                      'Towed Object': 5, 'Other Vehicle': 5}
+        if self.cls_type not in type_to_id.keys():
+            return -1
+        return type_to_id[self.cls_type]
 
 
     def get_astyx_obj_level(self):
@@ -103,13 +103,21 @@ class Object3dAstyx(object):
         return kitti_str
 
 
-    def convert_to_camera3d_obj(self):
-        self.loc_camera = T_from_radar_to_camera()
-        orient_camera = T_from_radar_to_camera()
-        self.rot_camera = quat_to_rotation(orient_camera)
+    def convert_to_camera3d_obj(self, calib):
+        loc_camera = np.dot(calib['T_from_radar_to_camera'][0:3, 0:3], np.transpose(self.loc))
+        loc_camera += calib['T_from_radar_to_camera'][0:3, 3]
+        self.loc_camera = np.transpose(loc_camera)
+
+        T = quat_to_rotation(self.orient)
+        T = np.dot(calib['T_from_radar_to_camera'][:, 0:3], T)
+        self.rot_camera = math.atan2(T[1, 0], T[0, 0])
 
 
-    def convert_to_lidar_obj(self):
-        self.loc_lidar = T_from_radar_to_lidar()
-        orient_lidar = T_from_radar_to_lidar()
-        self.rot_lidar = quat_to_rotation(orient_lidar)
+    def convert_to_lidar_obj(self, calib):
+        loc_lidar = np.dot(calib['T_from_radar_to_lidar'][0:3, 0:3], np.transpose(self.loc))
+        loc_lidar += calib['T_from_radar_to_lidar'][0:3, 3]
+        self.loc_lidar = np.transpose(loc_lidar)
+
+        T = quat_to_rotation(self.orient)
+        T = np.dot(calib['T_from_radar_to_lidar'][:, 0:3], T)
+        self.rot_lidar = math.atan2(T[1, 0], T[0, 0])

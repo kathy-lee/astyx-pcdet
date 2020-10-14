@@ -142,7 +142,9 @@ class AstyxDataset(DatasetTemplate):
 
             if has_label:
                 obj_list = self.get_label(sample_idx)
-                obj_list.convert_to_camera3d_obj()
+                for obj in obj_list:
+                    obj.convert_to_camera3d_obj(calib)
+
                 annotations = {}
                 annotations['name'] = np.array([obj.cls_type for obj in obj_list])
                 # annotations['truncated'] = np.array([obj.truncation for obj in obj_list])
@@ -171,7 +173,8 @@ class AstyxDataset(DatasetTemplate):
                 # # loc_lidar[:, 2] += h[:, 0] / 2
                 # # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, -(np.pi / 2 + rots[..., np.newaxis])], axis=1)
                 # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
-                obj_list.convert_to_lidar_obj()
+                for obj in obj_list:
+                    obj.convert_to_lidar_obj(calib)
                 gt_boxes_lidar = np.array([[obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
