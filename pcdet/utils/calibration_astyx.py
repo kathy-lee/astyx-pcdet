@@ -3,27 +3,17 @@ import json
 import math
 
 
-def inv_trans(T):
-    rotation = np.linalg.inv(T[0:3, 0:3])  # rotation matrix
-
-    translation = T[0:3, 3]
-    translation = -1 * np.dot(rotation, translation.T)
-    translation = np.reshape(translation, (3, 1))
-    Q = np.hstack((rotation, translation))
-    return Q
-
-
 def get_calib_from_file(calib_file):
     with open(calib_file, 'r') as f:
         data = json.load(f)
-    T_fromLidar = np.array(data['sensors'][1]['calib_data']['T_to_ref_COS'])
-    T_fromCamera = np.array(data['sensors'][2]['calib_data']['T_to_ref_COS'])
+    T_from_lidar_to_radar = np.array(data['sensors'][1]['calib_data']['T_to_ref_COS'])
+    T_from_camera_to_radar = np.array(data['sensors'][2]['calib_data']['T_to_ref_COS'])
     K = np.array(data['sensors'][2]['calib_data']['K'])
 
-    T_toLidar = inv_trans(T_fromLidar)
-    T_toCamera = inv_trans(T_fromCamera)
-    return {'T_toLidar': T_toLidar,
-            'T_toCamera': T_toCamera,
+    T_from_radar_to_lidar = inv_trans(T_from_lidar_to_radar)
+    T_from_radar_to_camera = inv_trans(T_from_camera_to_radar)
+    return {'T_from_radar_to_lidar': T_from_radar_to_lidar,
+            'T_from_radar_to_camera': T_from_radar_to_camera,
             'K': K}
 
 
@@ -49,6 +39,16 @@ def get_rot_lidar(orient, T_toLidar):
         rot_lidar.append(rot)
     rot_lidar = np.array(rot_lidar)
     return rot_lidar[:, np.newaxis]
+
+
+def inv_trans(T):
+    rotation = np.linalg.inv(T[0:3, 0:3])  # rotation matrix
+
+    translation = T[0:3, 3]
+    translation = -1 * np.dot(rotation, translation.T)
+    translation = np.reshape(translation, (3, 1))
+    Q = np.hstack((rotation, translation))
+    return Q
 
 
 def quat_to_rotation(quat):
