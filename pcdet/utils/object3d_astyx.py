@@ -40,6 +40,7 @@ class Object3dAstyx(object):
         self.level_str = None
         self.level = self.get_astyx_obj_level()
 
+
     def get_astyx_obj_level(self):
         # height = float(self.box2d[3]) - float(self.box2d[1]) + 1
 
@@ -55,6 +56,7 @@ class Object3dAstyx(object):
         else:
             self.level_str = 'UnKnown'
             return -1
+
 
     def generate_corners3d(self):
         """
@@ -85,11 +87,13 @@ class Object3dAstyx(object):
 
         return bbox
 
+
     def to_str(self):
         print_str = '%s %.3f %.3f %.3f box2d: %s hwl: [%.3f %.3f %.3f] pos: %s ry: %.3f' \
                      % (self.cls_type, self.truncation, self.occlusion, self.alpha, self.box2d, self.h, self.w, self.l,
                         self.loc, self.ry)
         return print_str
+
 
     def to_kitti_format(self):
         kitti_str = '%s %.2f %d %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f' \
@@ -99,6 +103,13 @@ class Object3dAstyx(object):
         return kitti_str
 
 
-  def convert_to_kitti_obj(self):
-        self.loc =
-        self.ry =
+    def convert_to_camera3d_obj(self):
+        self.loc_camera = T_from_radar_to_camera()
+        orient_camera = T_from_radar_to_camera()
+        self.rot_camera = quat_to_rotation(orient_camera)
+
+
+    def convert_to_lidar_obj(self):
+        self.loc_lidar = T_from_radar_to_lidar()
+        orient_lidar = T_from_radar_to_lidar()
+        self.rot_lidar = quat_to_rotation(orient_lidar)
