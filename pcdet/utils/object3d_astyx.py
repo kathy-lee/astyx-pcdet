@@ -15,7 +15,11 @@ class Object3dAstyx(object):
     def __init__(self, dict):
         self.src = dict
         self.cls_type = dict['classname'] if dict['classname']!='Person' else 'Pedestrian'
-        self.cls_id = cls_type_to_id()
+        cls_type_to_id = {
+            'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
+            'Towed Object': 5, 'Other Vehicle': 5
+        }
+        self.cls_id = cls_type_to_id[self.cls_type]
         # self.truncation = float(label[1])
         self.occlusion = float(dict['occlusion'])# 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
         # self.alpha = float(label[3])
@@ -32,13 +36,6 @@ class Object3dAstyx(object):
         self.score = float(dict['score'])
         self.level_str = None
         self.level = self.get_astyx_obj_level()
-
-    def cls_type_to_id(self):
-        type_to_id = {'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
-                      'Towed Object': 5, 'Other Vehicle': 5}
-        if self.cls_type not in type_to_id.keys():
-            return -1
-        return type_to_id[self.cls_type]
 
 
     def get_astyx_obj_level(self):
