@@ -294,20 +294,21 @@ class AstyxDataset(DatasetTemplate):
             calib = batch_dict['calib'][batch_index]
             image_shape = batch_dict['image_shape'][batch_index]
             # pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
-            pred_boxes_camera = calibration_astyx.boxes_lidar_to_astyx_camera(pred_boxes, calib)
+            obj = Object3dAstyx.from_prediction(pred_boxes, pred_labels, pred_scores)
+            obj.from_lidar_to_camera(calib)
             # pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
             #     pred_boxes_camera, calib, image_shape=image_shape
             # )
-            pred_boxes_img = calibration_astyx.boxes3d_camera_to_astyx_imageboxes(
-                pred_boxes_camera, calib, image_shape=image_shape
-            )
 
             pred_dict['name'] = np.array(class_names)[pred_labels - 1]
-            pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
-            pred_dict['bbox'] = pred_boxes_img
-            pred_dict['dimensions'] = pred_boxes_camera[:, 3:6]
-            pred_dict['location'] = pred_boxes_camera[:, 0:3]
-            pred_dict['rotation_y'] = pred_boxes_camera[:, 6]
+            # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
+            # pred_dict['bbox'] = pred_boxes_img
+            # pred_dict['dimensions'] = pred_boxes_camera[:, 3:6]
+            # pred_dict['location'] = pred_boxes_camera[:, 0:3]
+            # pred_dict['rotation_y'] = pred_boxes_camera[:, 6]
+            pred_dict['dimensions'] = [obj.l, obj.h, obj.w]
+            pred_dict['location'] = obj.loc_camera
+            pred_dict['rotation_y'] = obj.rot_camera
             pred_dict['score'] = pred_scores
             pred_dict['boxes_lidar'] = pred_boxes
 
@@ -357,7 +358,6 @@ class AstyxDataset(DatasetTemplate):
         return len(self.astyx_infos)
 
     def __getitem__(self, index):
-        # index = 4
         if self._merge_all_iters_to_one_epoch:
             index = index % len(self.astyx_infos)
 
