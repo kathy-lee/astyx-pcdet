@@ -6,7 +6,7 @@ from . calibration_astyx import quat_to_rotation
 def get_objects_from_label(label_file):
     with open(label_file, 'r') as f:
         data = json.load(f)
-    objects = [Object3d(obj) for obj in data['objects']]
+    objects = [Object3dAstyx(obj) for obj in data['objects']]
     return objects
 
 
@@ -18,11 +18,9 @@ def cls_type_to_id(cls_type):
     return type_to_id[cls_type]
 
 
-class Object3d(object):
+class Object3dAstyx(object):
     def __init__(self, dict):
-        # label = line.strip().split(' ')
-        # self.src = line
-        # self.cls_type = label[0]
+        self.src = dict
         self.cls_type = dict['classname'] if dict['classname']!='Person' else 'Pedestrian'
         self.cls_id = cls_type_to_id(self.cls_type)
         # self.truncation = float(label[1])
@@ -99,3 +97,8 @@ class Object3d(object):
                        self.box2d[2], self.box2d[3], self.h, self.w, self.l, self.loc[0], self.loc[1], self.loc[2],
                        self.ry)
         return kitti_str
+
+
+  def convert_to_kitti_obj(self):
+        self.loc =
+        self.ry =
