@@ -366,7 +366,8 @@ class AstyxDataset(DatasetTemplate):
         sample_idx = info['point_cloud']['lidar_idx']
 
         points = self.get_lidar(sample_idx)
-        calib = self.get_calib(sample_idx)
+        # calib = self.get_calib(sample_idx)
+        calib = info['calib']
 
         img_shape = info['image']['image_shape']
         if self.dataset_cfg.FOV_POINTS_ONLY:
