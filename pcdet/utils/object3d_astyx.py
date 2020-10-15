@@ -133,7 +133,7 @@ class Object3dAstyx(object):
         loc_radar += calib['T_from_lidar_to_radar'][0:3, 3]
         self.loc = np.transpose(loc_radar)
         self.orient = rot_to_quat(self.rot_lidar, 0, 0)
-        self.from_radar_to_camera(self, calib)
+        self.from_radar_to_camera(calib)
 
 
 def rot_to_quat(yaw, pitch, roll):
