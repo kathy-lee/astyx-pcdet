@@ -1,21 +1,19 @@
 import numpy as np
-import json
 import math
 
 
 class Object3dAstyx(object):
-    def __init__(self, dimension3d,  score):
+    def __init__(self, dimension3d, score):
         self.h = dimension3d[2]
         self.w = dimension3d[0]
         self.l = dimension3d[1]
         self.score = score
 
-
     @classmethod
-    def from_label(cls, dict):
-        obj = cls(dict['dimension3d'], dict['score'])
+    def from_label(cls, labelinfo):
+        obj = cls(labelinfo['dimension3d'], labelinfo['score'])
         obj.src = dict
-        obj.cls_type = dict['classname'] if dict['classname'] != 'Person' else 'Pedestrian'
+        obj.cls_type = labelinfo['classname'] if labelinfo['classname'] != 'Person' else 'Pedestrian'
         cls_type_to_id = {
             'Bus': 0, 'Car': 1, 'Cyclist': 2, 'Motorcyclist': 3, 'Pedestrian': 4, 'Trailer': 5, 'Truck': 6,
             'Towed Object': 5, 'Other Vehicle': 5
@@ -23,19 +21,18 @@ class Object3dAstyx(object):
         obj.cls_id = cls_type_to_id[obj.cls_type]
         # self.truncation = float(label[1])
         obj.occlusion = float(
-            dict['occlusion'])  # 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
+            labelinfo['occlusion'])  # 0:fully visible 1:partly occluded 2:largely occluded 3:fully occluded
         # self.alpha = float(label[3])
         # self.box2d = np.array((float(label[4]), float(label[5]), float(label[6]), float(label[7])), dtype=np.float32)
         # self.loc = np.array((float(label[11]), float(label[12]), float(label[13])), dtype=np.float32)
-        obj.loc = np.array(dict['center3d'])
+        obj.loc = np.array(labelinfo['center3d'])
         # self.dis_to_cam = np.linalg.norm(self.loc)
         # self.ry = float(label[14])
-        obj.orient = dict['orientation_quat']
+        obj.orient = labelinfo['orientation_quat']
         # self.score = float(label[15]) if label.__len__() == 16 else -1.0
         obj.level_str = None
         obj.level = obj.get_astyx_obj_level()
         return obj
-
 
     @classmethod
     def from_prediction(cls, pred_boxes, pred_labels, pred_scores):
@@ -44,7 +41,6 @@ class Object3dAstyx(object):
         obj.loc_lidar = pred_boxes[:3]
         obj.rot_lidar = pred_boxes[-1]
         return obj
-
 
     def get_astyx_obj_level(self):
         # height = float(self.box2d[3]) - float(self.box2d[1]) + 1
@@ -61,7 +57,6 @@ class Object3dAstyx(object):
         else:
             self.level_str = 'UnKnown'
             return -1
-
 
     def generate_corners3d(self):
         """
@@ -84,7 +79,7 @@ class Object3dAstyx(object):
         y_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
         z_corners = [h / 2, h / 2, h / 2, h / 2, -h / 2, -h / 2, -h / 2, -h / 2]
         # rotate and translate 3d bounding box
-        R = quat_to_rotation(self.orient)
+        R = quat_to_rot(self.orient)
         bbox = np.vstack([x_corners, y_corners, z_corners])
         bbox = np.dot(R, bbox)
         bbox = bbox + self.loc[:, np.newaxis]
@@ -92,13 +87,11 @@ class Object3dAstyx(object):
 
         return bbox
 
-
     def to_str(self):
         print_str = '%s %.3f %.3f %.3f box2d: %s hwl: [%.3f %.3f %.3f] pos: %s ry: %.3f' \
-                     % (self.cls_type, self.truncation, self.occlusion, self.alpha, self.box2d, self.h, self.w, self.l,
-                        self.loc, self.ry)
+                    % (self.cls_type, self.truncation, self.occlusion, self.alpha, self.box2d, self.h, self.w, self.l,
+                       self.loc, self.ry)
         return print_str
-
 
     def to_kitti_format(self):
         kitti_str = '%s %.2f %d %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f' \
@@ -107,28 +100,36 @@ class Object3dAstyx(object):
                        self.ry)
         return kitti_str
 
-
     def from_radar_to_camera(self, calib):
         loc_camera = np.dot(calib['T_from_radar_to_camera'][0:3, 0:3], np.transpose(self.loc))
         loc_camera += calib['T_from_radar_to_camera'][0:3, 3]
         self.loc_camera = np.transpose(loc_camera)
 
-        T = quat_to_rotation(self.orient)
+        T = quat_to_rot(self.orient)
         T = np.dot(calib['T_from_radar_to_camera'][:, 0:3], T)
         self.rot_camera = math.atan2(T[1, 0], T[0, 0])
-
 
     def from_radar_to_lidar(self, calib):
         loc_lidar = np.dot(calib['T_from_radar_to_lidar'][0:3, 0:3], np.transpose(self.loc))
         loc_lidar += calib['T_from_radar_to_lidar'][0:3, 3]
         self.loc_lidar = np.transpose(loc_lidar)
 
-        T = quat_to_rotation(self.orient)
+        T = quat_to_rot(self.orient)
         T = np.dot(calib['T_from_radar_to_lidar'][:, 0:3], T)
         self.rot_lidar = math.atan2(T[1, 0], T[0, 0])
 
     def from_lidar_to_camera(self, calib):
-        pass
+        loc_radar = np.dot(calib['T_from_lidar_to_radar'][0:3, 0:3], np.transpose(self.loc_lidar))
+        loc_radar += calib['T_from_lidar_to_radar'][0:3, 3]
+        self.loc = np.transpose(loc_radar)
+        self.orient = rot_to_quat(self.rot_lidar)
+        self.from_radar_to_camera(self, calib)
+
+
+def rot_to_quat(rot):
+    quat = 0
+    return quat
+
 
 def inv_trans(T):
     rotation = np.linalg.inv(T[0:3, 0:3])  # rotation matrix
@@ -139,7 +140,8 @@ def inv_trans(T):
     Q = np.hstack((rotation, translation))
     return Q
 
-def quat_to_rotation(quat):
+
+def quat_to_rot(quat):
     m = np.sum(np.multiply(quat, quat))
     q = quat.copy()
     q = np.array(q)
@@ -160,4 +162,3 @@ def quat_to_rotation(quat):
     # t = np.transpose(rotation)
     # o = np.dot(rotation, t)
     return rot_matrix
-

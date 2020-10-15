@@ -98,6 +98,8 @@ class AstyxDataset(DatasetTemplate):
         T_from_radar_to_camera = inv_trans(T_from_camera_to_radar)
         return {'T_from_radar_to_lidar': T_from_radar_to_lidar,
                 'T_from_radar_to_camera': T_from_radar_to_camera,
+                'T_from_lidar_to_radar': T_from_lidar_to_radar,
+                'T_from_camera_to_radar': T_from_camera_to_radar,
                 'K': K}
 
 
