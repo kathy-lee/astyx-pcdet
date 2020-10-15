@@ -246,7 +246,7 @@ class AstyxDataset(DatasetTemplate):
             annos = info['annos']
             names = annos['name']
             difficulty = annos['difficulty']
-            # bbox = annos['bbox']
+            bbox = annos['bbox']
             gt_boxes = annos['gt_boxes_lidar']
 
             num_obj = gt_boxes.shape[0]
@@ -265,12 +265,9 @@ class AstyxDataset(DatasetTemplate):
 
                 if (used_classes is None) or names[i] in used_classes:
                     db_path = str(filepath.relative_to(self.root_path))  # gt_database/xxxxx.bin
-                    # db_info = {'name': names[i], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': i,
-                    #            'box3d_lidar': gt_boxes[i], 'num_points_in_gt': gt_points.shape[0],
-                    #            'difficulty': difficulty[i], 'bbox': bbox[i], 'score': annos['score'][i]}
                     db_info = {'name': names[i], 'path': db_path, 'image_idx': sample_idx, 'gt_idx': i,
                                'box3d_lidar': gt_boxes[i], 'num_points_in_gt': gt_points.shape[0],
-                               'difficulty': difficulty[i], 'score': annos['score'][i]}
+                               'difficulty': difficulty[i], 'bbox': bbox[i], 'score': annos['score'][i]}
                     if names[i] in all_db_infos:
                         all_db_infos[names[i]].append(db_info)
                     else:
@@ -330,7 +327,8 @@ class AstyxDataset(DatasetTemplate):
                 pred_dict['location'][i,:] = np.array(obj.loc_camera)
                 pred_dict['rotation_y'][i] = np.array(obj.rot_camera)
                 # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
-                # pred_dict['bbox'] = pred_boxes_img
+                obj.from_camera_to_image(calib)
+                pred_dict['bbox'] = np.array(obj.imgbbox)
 
             pred_dict['name'] = np.array(class_names)[pred_labels - 1]
             pred_dict['score'] = pred_scores
