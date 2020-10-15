@@ -18,6 +18,9 @@ class Object3dAstyx(object):
         self.level_str = ''
         self.loc_lidar = [None]*3
         self.rot_lidar = 0.0
+        self.loc_camera = [None]*3
+        self.rot_camera = 0.0
+        self.imgbbox = [None]*4
 
     @classmethod
     def from_label(cls, labelinfo):
@@ -134,6 +137,11 @@ class Object3dAstyx(object):
         self.loc = np.transpose(loc_radar)
         self.orient = rot_to_quat(self.rot_lidar, 0, 0)
         self.from_radar_to_camera(calib)
+
+    def from_camera_to_image(self, calib):
+        obj_image = np.dot(calib['K'], self.loc_camera)
+        obj_image = obj_image / obj_image[2, :]
+        self.imgbbox = np.delete(obj_image, 2, 0)
 
 
 def rot_to_quat(yaw, pitch, roll):
