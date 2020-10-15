@@ -20,7 +20,7 @@ class Object3dAstyx(object):
         self.rot_lidar = 0.0
         self.loc_camera = [None]*3
         self.rot_camera = 0.0
-        self.imgbbox = [None]*4
+        self.box2d = [None]*4
 
     @classmethod
     def from_label(cls, labelinfo):
@@ -77,17 +77,6 @@ class Object3dAstyx(object):
         :return corners_3d: (8, 3) corners of box3d in camera coord
         """
         l, h, w = self.l, self.h, self.w
-        # x_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
-        # y_corners = [0, 0, 0, 0, -h, -h, -h, -h]
-        # z_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
-        #
-        # R = np.array([[np.cos(self.ry), 0, np.sin(self.ry)],
-        #               [0, 1, 0],
-        #               [-np.sin(self.ry), 0, np.cos(self.ry)]])
-        # corners3d = np.vstack([x_corners, y_corners, z_corners])  # (3, 8)
-        # corners3d = np.dot(R, corners3d).T
-        # corners3d = corners3d + self.loc
-
         x_corners = [w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2]
         y_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
         z_corners = [h / 2, h / 2, h / 2, h / 2, -h / 2, -h / 2, -h / 2, -h / 2]
@@ -97,7 +86,6 @@ class Object3dAstyx(object):
         bbox = np.dot(R, bbox)
         bbox = bbox + self.loc[:, np.newaxis]
         bbox = np.transpose(bbox)
-
         return bbox
 
     def to_str(self):
@@ -139,9 +127,10 @@ class Object3dAstyx(object):
         self.from_radar_to_camera(calib)
 
     def from_camera_to_image(self, calib):
-        obj_image = np.dot(calib['K'], self.loc_camera)
-        obj_image = obj_image / obj_image[2, :]
-        self.imgbbox = np.delete(obj_image, 2, 0)
+        corners = self.generate_corners3d()
+        bbox_image = np.dot(calib['K'], corners)
+        bbox_image = bbox_image / bbox_image[2, :]
+        self.bbox2d = np.delete(bbox_image, 2, 0)
 
 
 def rot_to_quat(yaw, pitch, roll):
