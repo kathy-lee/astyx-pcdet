@@ -198,7 +198,7 @@ class AstyxDataset(DatasetTemplate):
                 # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
                 for obj in obj_list:
                     obj.from_radar_to_lidar(calib)
-                gt_boxes_lidar = np.array([[obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
+                gt_boxes_lidar = np.array([[*obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
                 info['annos'] = annotations
@@ -363,13 +363,13 @@ class AstyxDataset(DatasetTemplate):
         return annos
 
     def evaluation(self, det_annos, class_names, **kwargs):
-        if 'annos' not in self.kitti_infos[0].keys():
+        if 'annos' not in self.astyx_infos[0].keys():
             return None, {}
 
-        from pcdet.datasets.kitti.kitti_object_eval_python import eval as kitti_eval
+        from pcdet.datasets.kitti.kitti_object_eval_python import eval as kitti_eval  # use the same kitti eval package
 
         eval_det_annos = copy.deepcopy(det_annos)
-        eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.kitti_infos]
+        eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.astyx_infos]
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
 
         return ap_result_str, ap_dict
