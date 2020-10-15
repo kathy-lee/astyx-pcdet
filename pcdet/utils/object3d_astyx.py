@@ -7,7 +7,17 @@ class Object3dAstyx(object):
         self.h = dimension3d[2]
         self.w = dimension3d[0]
         self.l = dimension3d[1]
+        self.loc = [None]*3
+        self.orient = [None]*4
         self.score = score
+        self.src = {}
+        self.cls_type = ''
+        self.cls_id = -1
+        self.occlusion = -1
+        self.level = -1
+        self.level_str = ''
+        self.loc_lidar = [None]*3
+        self.rot_lidar = 0.0
 
     @classmethod
     def from_label(cls, labelinfo):
@@ -126,9 +136,8 @@ class Object3dAstyx(object):
         self.from_radar_to_camera(self, calib)
 
 
-def rot_to_quat(rot):
-    quat = 0
-    return quat
+def rot_to_quat(yaw, pitch, roll):
+
 
 
 def inv_trans(T):
