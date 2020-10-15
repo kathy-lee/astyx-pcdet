@@ -167,13 +167,14 @@ class AstyxDataset(DatasetTemplate):
                 obj_list = self.get_label(sample_idx)
                 for obj in obj_list:
                     obj.from_radar_to_camera(calib)
+                    obj.from_camera_to_image(calib)
 
                 annotations = {}
                 annotations['name'] = np.array([obj.cls_type for obj in obj_list])
                 # annotations['truncated'] = np.array([obj.truncation for obj in obj_list])
                 annotations['occluded'] = np.array([obj.occlusion for obj in obj_list])
                 # annotations['alpha'] = np.array([obj.alpha for obj in obj_list])
-                # annotations['bbox'] = np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0)
+                annotations['bbox'] = np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0)
                 annotations['dimensions'] = np.array([[obj.l, obj.h, obj.w] for obj in obj_list])  # lhw(camera) format
                 annotations['location'] = np.concatenate([obj.loc_camera.reshape(1, 3) for obj in obj_list], axis=0)
                 annotations['rotation_y'] = np.array([obj.rot_camera for obj in obj_list])
