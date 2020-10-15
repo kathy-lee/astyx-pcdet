@@ -1,14 +1,6 @@
 import numpy as np
 import json
 import math
-from . calibration_astyx import quat_to_rotation
-
-
-def get_objects_from_label(label_file):
-    with open(label_file, 'r') as f:
-        data = json.load(f)
-    objects = [Object3dAstyx(obj) for obj in data['objects']]
-    return objects
 
 
 class Object3dAstyx(object):
@@ -44,13 +36,15 @@ class Object3dAstyx(object):
         obj.level = obj.get_astyx_obj_level()
         return obj
 
+
     @classmethod
-    def from_prediction(cls, pred_dict):
-        obj = cls(pred_dict['pred_boxes']['dimension3d'], pred_dict['pred_scores'])
-        obj.cls_id = pred_dict['pred_labels']
-        obj.loc_lidar = pred_dict['pred_boxes'][:3]
-        obj.rot_lidar = pred_dict['pred_boxes'][-1]
+    def from_prediction(cls, pred_boxes, pred_labels, pred_scores):
+        obj = cls(pred_boxes['dimension3d'], pred_scores)
+        obj.cls_id = pred_labels
+        obj.loc_lidar = pred_boxes[:3]
+        obj.rot_lidar = pred_boxes[-1]
         return obj
+
 
     def get_astyx_obj_level(self):
         # height = float(self.box2d[3]) - float(self.box2d[1]) + 1
@@ -114,7 +108,7 @@ class Object3dAstyx(object):
         return kitti_str
 
 
-    def convert_to_camera3d_obj(self, calib):
+    def from_radar_to_camera(self, calib):
         loc_camera = np.dot(calib['T_from_radar_to_camera'][0:3, 0:3], np.transpose(self.loc))
         loc_camera += calib['T_from_radar_to_camera'][0:3, 3]
         self.loc_camera = np.transpose(loc_camera)
@@ -124,7 +118,7 @@ class Object3dAstyx(object):
         self.rot_camera = math.atan2(T[1, 0], T[0, 0])
 
 
-    def convert_to_lidar_obj(self, calib):
+    def from_radar_to_lidar(self, calib):
         loc_lidar = np.dot(calib['T_from_radar_to_lidar'][0:3, 0:3], np.transpose(self.loc))
         loc_lidar += calib['T_from_radar_to_lidar'][0:3, 3]
         self.loc_lidar = np.transpose(loc_lidar)
@@ -134,3 +128,36 @@ class Object3dAstyx(object):
         self.rot_lidar = math.atan2(T[1, 0], T[0, 0])
 
     def from_lidar_to_camera(self, calib):
+        pass
+
+def inv_trans(T):
+    rotation = np.linalg.inv(T[0:3, 0:3])  # rotation matrix
+
+    translation = T[0:3, 3]
+    translation = -1 * np.dot(rotation, translation.T)
+    translation = np.reshape(translation, (3, 1))
+    Q = np.hstack((rotation, translation))
+    return Q
+
+def quat_to_rotation(quat):
+    m = np.sum(np.multiply(quat, quat))
+    q = quat.copy()
+    q = np.array(q)
+    n = np.dot(q, q)
+    if n < np.finfo(q.dtype).eps:
+        rot_matrix = np.identity(4)
+        return rot_matrix
+    q = q * np.sqrt(2.0 / n)
+    q = np.outer(q, q)
+    rot_matrix = np.array(
+        [[1.0 - q[2, 2] - q[3, 3], q[1, 2] + q[3, 0], q[1, 3] - q[2, 0]],
+         [q[1, 2] - q[3, 0], 1.0 - q[1, 1] - q[3, 3], q[2, 3] + q[1, 0]],
+         [q[1, 3] + q[2, 0], q[2, 3] - q[1, 0], 1.0 - q[1, 1] - q[2, 2]]],
+        dtype=q.dtype)
+    rot_matrix = np.transpose(rot_matrix)
+    # # test if it is truly a rotation matrix
+    # d = np.linalg.det(rotation)
+    # t = np.transpose(rotation)
+    # o = np.dot(rotation, t)
+    return rot_matrix
+
