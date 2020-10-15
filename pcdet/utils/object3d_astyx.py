@@ -85,7 +85,6 @@ class Object3dAstyx(object):
         bbox = np.vstack([x_corners, y_corners, z_corners])
         bbox = np.dot(R, bbox)
         bbox = bbox + self.loc[:, np.newaxis]
-        bbox = np.transpose(bbox)
         return bbox
 
     def to_str(self):
@@ -130,7 +129,8 @@ class Object3dAstyx(object):
         corners = self.generate_corners3d()
         bbox_image = np.dot(calib['K'], corners)
         bbox_image = bbox_image / bbox_image[2, :]
-        self.bbox2d = np.delete(bbox_image, 2, 0)
+        bbox_image = np.delete(bbox_image, 2, 0)
+        self.box2d = np.array([*bbox_image[:, 0], *bbox_image[:,4]])
 
 
 def rot_to_quat(yaw, pitch, roll):
