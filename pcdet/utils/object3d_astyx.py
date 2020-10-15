@@ -46,7 +46,7 @@ class Object3dAstyx(object):
 
     @classmethod
     def from_prediction(cls, pred_boxes, pred_labels, pred_scores):
-        obj = cls(pred_boxes['dimension3d'], pred_scores)
+        obj = cls(pred_boxes[3:6], pred_scores)
         obj.cls_id = pred_labels
         obj.loc_lidar = pred_boxes[:3]
         obj.rot_lidar = pred_boxes[-1]
