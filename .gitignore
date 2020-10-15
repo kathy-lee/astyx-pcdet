@@ -1,1 +1,9 @@
 .idea/
+build/
+output/
+**/__pycache__/
+data/astyx/testing
+data/astyx/training
+data/kitti/gt_database/
+pcdet.egg-info/
+*.so
