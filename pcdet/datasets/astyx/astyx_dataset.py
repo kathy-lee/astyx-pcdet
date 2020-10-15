@@ -1,11 +1,13 @@
 import copy
 import pickle
+import json
 
 import numpy as np
 from skimage import io
 
 from ...ops.roiaware_pool3d import roiaware_pool3d_utils
-from ...utils import box_utils, common_utils, object3d_astyx, calibration_astyx
+from ...utils import box_utils, common_utils
+from ...utils.object3d_astyx import Object3dAstyx, inv_trans
 from ..dataset import DatasetTemplate
 
 
@@ -31,6 +33,7 @@ class AstyxDataset(DatasetTemplate):
         self.astyx_infos = []
         self.include_astyx_data(self.mode)
 
+
     def include_astyx_data(self, mode):
         if self.logger is not None:
             self.logger.info('Loading Astyx dataset')
@@ -49,6 +52,7 @@ class AstyxDataset(DatasetTemplate):
         if self.logger is not None:
             self.logger.info('Total samples for Astyx dataset: %d' % (len(astyx_infos)))
 
+
     def set_split(self, split):
         super().__init__(
             dataset_cfg=self.dataset_cfg, class_names=self.class_names, training=self.training, root_path=self.root_path, logger=self.logger
@@ -59,26 +63,43 @@ class AstyxDataset(DatasetTemplate):
         split_dir = self.root_path / 'ImageSets' / (self.split + '.txt')
         self.sample_id_list = [x.strip() for x in open(split_dir).readlines()] if split_dir.exists() else None
 
+
     def get_lidar(self, idx):
         lidar_file = self.root_split_path / 'lidar_vlp16' / ('%s.txt' % idx)
         assert lidar_file.exists()
         return np.loadtxt(str(lidar_file), dtype=np.float32, skiprows=1, usecols=(0,1,2,3))
+
 
     def get_image_shape(self, idx):
         img_file = self.root_split_path / 'camera_front' / ('%s.jpg' % idx)
         assert img_file.exists()
         return np.array(io.imread(img_file).shape[:2], dtype=np.int32)
 
+
     def get_label(self, idx):
         label_file = self.root_split_path / 'groundtruth_obj3d' / ('%s.json' % idx)
         assert label_file.exists()
-        return object3d_astyx.get_objects_from_label(label_file)
+        with open(label_file, 'r') as f:
+            data = json.load(f)
+        objects = [Object3dAstyx.from_label(obj) for obj in data['objects']]
+        return objects
+
 
     def get_calib(self, idx):
         calib_file = self.root_split_path / 'calibration' / ('%s.json' % idx)
         assert calib_file.exists()
-        #return calibration_astyx.Calibration(calib_file)
-        return calibration_astyx.get_calib_from_file(calib_file)
+        with open(calib_file, 'r') as f:
+            data = json.load(f)
+
+        T_from_lidar_to_radar = np.array(data['sensors'][1]['calib_data']['T_to_ref_COS'])
+        T_from_camera_to_radar = np.array(data['sensors'][2]['calib_data']['T_to_ref_COS'])
+        K = np.array(data['sensors'][2]['calib_data']['K'])
+        T_from_radar_to_lidar = inv_trans(T_from_lidar_to_radar)
+        T_from_radar_to_camera = inv_trans(T_from_camera_to_radar)
+        return {'T_from_radar_to_lidar': T_from_radar_to_lidar,
+                'T_from_radar_to_camera': T_from_radar_to_camera,
+                'K': K}
+
 
     def get_road_plane(self, idx):
         plane_file = self.root_split_path / 'planes' / ('%s.txt' % idx)
@@ -143,7 +164,7 @@ class AstyxDataset(DatasetTemplate):
             if has_label:
                 obj_list = self.get_label(sample_idx)
                 for obj in obj_list:
-                    obj.convert_to_camera3d_obj(calib)
+                    obj.from_radar_to_camera(calib)
 
                 annotations = {}
                 annotations['name'] = np.array([obj.cls_type for obj in obj_list])
@@ -174,7 +195,7 @@ class AstyxDataset(DatasetTemplate):
                 # # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, -(np.pi / 2 + rots[..., np.newaxis])], axis=1)
                 # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
                 for obj in obj_list:
-                    obj.convert_to_lidar_obj(calib)
+                    obj.from_radar_to_lidar(calib)
                 gt_boxes_lidar = np.array([[obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
