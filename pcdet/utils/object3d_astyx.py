@@ -132,12 +132,22 @@ class Object3dAstyx(object):
         loc_radar = np.dot(calib['T_from_lidar_to_radar'][0:3, 0:3], np.transpose(self.loc_lidar))
         loc_radar += calib['T_from_lidar_to_radar'][0:3, 3]
         self.loc = np.transpose(loc_radar)
-        self.orient = rot_to_quat(self.rot_lidar)
+        self.orient = rot_to_quat(self.rot_lidar, 0, 0)
         self.from_radar_to_camera(self, calib)
 
 
 def rot_to_quat(yaw, pitch, roll):
-
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    w = cr * cp * cy + sr * sp * sy
+    x = sr * cp * cy - cr * sp * sy
+    y = cr * sp * cy + sr * cp * sy
+    z = cr * cp * sy - sr * sp * cy
+    return [w, x, y, z]
 
 
 def inv_trans(T):
