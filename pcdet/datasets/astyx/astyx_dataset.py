@@ -168,18 +168,19 @@ class AstyxDataset(DatasetTemplate):
                 for obj in obj_list:
                     obj.from_radar_to_camera(calib)
                     obj.from_camera_to_image(calib)
+                    obj.from_radar_to_lidar(calib)
 
-                annotations = {}
-                annotations['name'] = np.array([obj.cls_type for obj in obj_list])
+                annotations = {'name': np.array([obj.cls_type for obj in obj_list]),
+                               'occluded': np.array([obj.occlusion for obj in obj_list]),
+                               'alpha': np.array([-np.arctan2(obj.loc_lidar[1], obj.loc_lidar[0])
+                                                  + obj.rot_camera for obj in obj_list]),
+                               'bbox': np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0),
+                               'dimensions': np.array([[obj.l, obj.h, obj.w] for obj in obj_list]),
+                               'location': np.concatenate([obj.loc_camera.reshape(1, 3) for obj in obj_list], axis=0),
+                               'rotation_y': np.array([obj.rot_camera for obj in obj_list]),
+                               'score': np.array([obj.score for obj in obj_list]),
+                               'difficulty': np.array([obj.level for obj in obj_list], np.int32)}
                 # annotations['truncated'] = np.array([obj.truncation for obj in obj_list])
-                annotations['occluded'] = np.array([obj.occlusion for obj in obj_list])
-                # annotations['alpha'] = np.array([obj.alpha for obj in obj_list])
-                annotations['bbox'] = np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0)
-                annotations['dimensions'] = np.array([[obj.l, obj.h, obj.w] for obj in obj_list])  # lhw(camera) format
-                annotations['location'] = np.concatenate([obj.loc_camera.reshape(1, 3) for obj in obj_list], axis=0)
-                annotations['rotation_y'] = np.array([obj.rot_camera for obj in obj_list])
-                annotations['score'] = np.array([obj.score for obj in obj_list])
-                annotations['difficulty'] = np.array([obj.level for obj in obj_list], np.int32)
 
                 num_objects = len([obj.cls_type for obj in obj_list if obj.cls_type != 'DontCare'])
                 num_gt = len(annotations['name'])
@@ -327,6 +328,7 @@ class AstyxDataset(DatasetTemplate):
                 pred_dict['location'][i, :] = np.array(obj.loc_camera)
                 pred_dict['rotation_y'][i] = np.array(obj.rot_camera)
                 # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
+                pred_dict['alpha'][i] = -np.arctan2(obj.loc_lidar[1], obj.loc_lidar[0]) + obj.rot_camera
                 obj.from_camera_to_image(calib)
                 pred_dict['bbox'][i, :] = np.array(obj.box2d)
 
@@ -369,6 +371,16 @@ class AstyxDataset(DatasetTemplate):
 
         eval_det_annos = copy.deepcopy(det_annos)
         eval_gt_annos = [copy.deepcopy(info['annos']) for info in self.astyx_infos]
+        ##################################################################
+        print(f'gt annos:')
+        print(len(eval_gt_annos))
+        for key, value in eval_gt_annos[0].items():
+            print(key, type(value), value.shape)
+        print(f'det annos:')
+        print(len(eval_det_annos))
+        for key, value in eval_det_annos[0].items():
+            print(key, type(value), value.shape)
+        ##################################################################
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
 
         return ap_result_str, ap_dict
@@ -405,6 +417,12 @@ class AstyxDataset(DatasetTemplate):
 
         if 'annos' in info:
             annos = info['annos']
+            ##################################################################
+            print(f'info annos:')
+            print(len(annos))
+            for key, value in annos.items():
+                print(key, type(value), value.shape)
+            ##################################################################
             annos = common_utils.drop_info_with_name(annos, name='DontCare')
             gt_names = annos['name']
             # loc, dims, rots = annos['location'], annos['dimensions'], annos['orientation']
