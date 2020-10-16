@@ -179,8 +179,8 @@ class AstyxDataset(DatasetTemplate):
                                'location': np.concatenate([obj.loc_camera.reshape(1, 3) for obj in obj_list], axis=0),
                                'rotation_y': np.array([obj.rot_camera for obj in obj_list]),
                                'score': np.array([obj.score for obj in obj_list]),
-                               'difficulty': np.array([obj.level for obj in obj_list], np.int32)}
-                # annotations['truncated'] = np.array([obj.truncation for obj in obj_list])
+                               'difficulty': np.array([obj.level for obj in obj_list], np.int32),
+                               'truncated': -np.ones(len(obj_list))}
 
                 num_objects = len([obj.cls_type for obj in obj_list if obj.cls_type != 'DontCare'])
                 num_gt = len(annotations['name'])
@@ -417,12 +417,12 @@ class AstyxDataset(DatasetTemplate):
 
         if 'annos' in info:
             annos = info['annos']
-            ##################################################################
-            print(f'info annos:')
-            print(len(annos))
-            for key, value in annos.items():
-                print(key, type(value), value.shape)
-            ##################################################################
+            # ##################################################################
+            # print(f'info annos:')
+            # print(len(annos))
+            # for key, value in annos.items():
+            #     print(key, type(value), value.shape)
+            # ##################################################################
             annos = common_utils.drop_info_with_name(annos, name='DontCare')
             gt_names = annos['name']
             # loc, dims, rots = annos['location'], annos['dimensions'], annos['orientation']
