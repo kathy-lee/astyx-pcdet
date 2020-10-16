@@ -323,12 +323,12 @@ class AstyxDataset(DatasetTemplate):
                         in zip(pred_boxes,pred_labels,pred_scores)]
             for i, obj in enumerate(obj_list):
                 obj.from_lidar_to_camera(calib)
-                pred_dict['dimensions'][i,:] = np.array([obj.l, obj.h, obj.w])
-                pred_dict['location'][i,:] = np.array(obj.loc_camera)
+                pred_dict['dimensions'][i, :] = np.array([obj.l, obj.h, obj.w])
+                pred_dict['location'][i, :] = np.array(obj.loc_camera)
                 pred_dict['rotation_y'][i] = np.array(obj.rot_camera)
                 # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
                 obj.from_camera_to_image(calib)
-                pred_dict['bbox'] = np.array(obj.imgbbox)
+                pred_dict['bbox'][i, :] = np.array(obj.box2d)
 
             pred_dict['name'] = np.array(class_names)[pred_labels - 1]
             pred_dict['score'] = pred_scores
