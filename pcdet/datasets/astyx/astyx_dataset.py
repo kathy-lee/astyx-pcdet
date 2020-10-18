@@ -33,7 +33,6 @@ class AstyxDataset(DatasetTemplate):
         self.astyx_infos = []
         self.include_astyx_data(self.mode)
 
-
     def include_astyx_data(self, mode):
         if self.logger is not None:
             self.logger.info('Loading Astyx dataset')
@@ -52,10 +51,10 @@ class AstyxDataset(DatasetTemplate):
         if self.logger is not None:
             self.logger.info('Total samples for Astyx dataset: %d' % (len(astyx_infos)))
 
-
     def set_split(self, split):
         super().__init__(
-            dataset_cfg=self.dataset_cfg, class_names=self.class_names, training=self.training, root_path=self.root_path, logger=self.logger
+            dataset_cfg=self.dataset_cfg, class_names=self.class_names, training=self.training,
+            root_path=self.root_path, logger=self.logger
         )
         self.split = split
         self.root_split_path = self.root_path / ('training' if self.split != 'test' else 'testing')
@@ -63,18 +62,15 @@ class AstyxDataset(DatasetTemplate):
         split_dir = self.root_path / 'ImageSets' / (self.split + '.txt')
         self.sample_id_list = [x.strip() for x in open(split_dir).readlines()] if split_dir.exists() else None
 
-
     def get_lidar(self, idx):
         lidar_file = self.root_split_path / 'lidar_vlp16' / ('%s.txt' % idx)
         assert lidar_file.exists()
         return np.loadtxt(str(lidar_file), dtype=np.float32, skiprows=1, usecols=(0,1,2,3))
 
-
     def get_image_shape(self, idx):
         img_file = self.root_split_path / 'camera_front' / ('%s.jpg' % idx)
         assert img_file.exists()
         return np.array(io.imread(img_file).shape[:2], dtype=np.int32)
-
 
     def get_label(self, idx):
         label_file = self.root_split_path / 'groundtruth_obj3d' / ('%s.json' % idx)
@@ -83,7 +79,6 @@ class AstyxDataset(DatasetTemplate):
             data = json.load(f)
         objects = [Object3dAstyx.from_label(obj) for obj in data['objects']]
         return objects
-
 
     def get_calib(self, idx):
         calib_file = self.root_split_path / 'calibration' / ('%s.json' % idx)
@@ -101,7 +96,6 @@ class AstyxDataset(DatasetTemplate):
                 'T_from_lidar_to_radar': T_from_lidar_to_radar,
                 'T_from_camera_to_radar': T_from_camera_to_radar,
                 'K': K}
-
 
     def get_road_plane(self, idx):
         plane_file = self.root_split_path / 'planes' / ('%s.txt' % idx)
@@ -376,10 +370,16 @@ class AstyxDataset(DatasetTemplate):
         print(len(eval_gt_annos))
         for key, value in eval_gt_annos[0].items():
             print(key, type(value), value.shape)
+        print(eval_gt_annos[0])
+
         print(f'det annos:')
         print(len(eval_det_annos))
         for key, value in eval_det_annos[0].items():
             print(key, type(value), value.shape)
+        print(eval_det_annos[0])
+
+        print(f'class names:')
+        print(class_names)
         ##################################################################
         ap_result_str, ap_dict = kitti_eval.get_official_eval_result(eval_gt_annos, eval_det_annos, class_names)
 
