@@ -107,7 +107,7 @@ class Object3dAstyx(object):
 
         T = quat_to_rot(self.orient)
         T = np.dot(calib['T_from_radar_to_camera'][:, 0:3], T)
-        _, self.rot_camera, _ = rot_to_angle(T)
+        self.rot_camera = rot_to_angle(T)[1]
 
     def from_radar_to_lidar(self, calib):
         loc_lidar = np.dot(calib['T_from_radar_to_lidar'][0:3, 0:3], np.transpose(self.loc))
@@ -116,7 +116,7 @@ class Object3dAstyx(object):
 
         T = quat_to_rot(self.orient)
         T = np.dot(calib['T_from_radar_to_lidar'][:, 0:3], T)
-        self.rot_lidar = math.atan2(T[1, 0], T[0, 0])
+        self.rot_lidar = rot_to_angle(T)[2]
 
     def from_lidar_to_camera(self, calib):
         loc_radar = np.dot(calib['T_from_lidar_to_radar'][0:3, 0:3], np.transpose(self.loc_lidar))
@@ -181,8 +181,7 @@ def quat_to_rot(quat):
 
 
 def rot_to_angle(T):
-
     rot_x = math.atan2(T[2,1], T[2, 2])
     rot_y = math.atan2(-T[2,0], math.sqrt(T[2, 1]*T[2, 1] + T[2, 2]*T[2, 2]))
     rot_z = math.atan2(T[1, 0], T[0, 0])
-    return rot_x, rot_y, rot_z
+    return [rot_x, rot_y, rot_z]
