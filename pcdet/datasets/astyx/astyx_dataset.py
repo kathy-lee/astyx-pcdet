@@ -179,15 +179,15 @@ class AstyxDataset(DatasetTemplate):
                 if count_inside_pts:
                     points = self.get_lidar(sample_idx)
                     calib = self.get_calib(sample_idx)
-                    pts_rect = calib.lidar_to_rect(points[:, 0:3])
+                    #pts_rect = calib.lidar_to_rect(points[:, 0:3])
 
-                    fov_flag = self.get_fov_flag(pts_rect, info['image']['image_shape'], calib)
-                    pts_fov = points[fov_flag]
+                    #fov_flag = self.get_fov_flag(pts_rect, info['image']['image_shape'], calib)
+                    #pts_fov = points[fov_flag]
                     corners_lidar = box_utils.boxes_to_corners_3d(gt_boxes_lidar)
                     num_points_in_gt = -np.ones(num_gt, dtype=np.int32)
 
                     for k in range(num_objects):
-                        flag = box_utils.in_hull(pts_fov[:, 0:3], corners_lidar[k])
+                        flag = box_utils.in_hull(points[:, 0:3], corners_lidar[k])
                         num_points_in_gt[k] = flag.sum()
                     annotations['num_points_in_gt'] = num_points_in_gt
 
@@ -433,13 +433,13 @@ def create_astyx_infos(dataset_cfg, class_names, data_path, save_path, workers=4
     print('---------------Start to generate data infos---------------')
 
     dataset.set_split(train_split)
-    astyx_infos_train = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=False)
+    astyx_infos_train = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)
     with open(train_filename, 'wb') as f:
         pickle.dump(astyx_infos_train, f)
     print('Astyx info train file is saved to %s' % train_filename)
 
     dataset.set_split(val_split)
-    astyx_infos_val = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=False)
+    astyx_infos_val = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)
     with open(val_filename, 'wb') as f:
         pickle.dump(astyx_infos_val, f)
     print('Astyx info val file is saved to %s' % val_filename)
