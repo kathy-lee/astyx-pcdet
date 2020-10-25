@@ -146,15 +146,6 @@ class AstyxDataset(DatasetTemplate):
             image_info = {'image_idx': sample_idx, 'image_shape': self.get_image_shape(sample_idx)}
             info['image'] = image_info
             calib = self.get_calib(sample_idx)
-
-            # P2 = np.concatenate([calib.P2, np.array([[0., 0., 0., 1.]])], axis=0)
-            # R0_4x4 = np.zeros([4, 4], dtype=calib.R0.dtype)
-            # R0_4x4[3, 3] = 1.
-            # R0_4x4[:3, :3] = calib.R0
-            # V2C_4x4 = np.concatenate([calib.V2C, np.array([[0., 0., 0., 1.]])], axis=0)
-            # calib_info = {'P2': P2, 'R0_rect': R0_4x4, 'Tr_velo_to_cam': V2C_4x4}
-            # info['calib'] = calib_info
-
             info['calib'] = calib
 
             if has_label:
@@ -180,20 +171,6 @@ class AstyxDataset(DatasetTemplate):
                 num_gt = len(annotations['name'])
                 index = list(range(num_objects)) + [-1] * (num_gt - num_objects)
                 annotations['index'] = np.array(index, dtype=np.int32)
-
-                # loc = annotations['location'][:num_objects]
-                # dims = annotations['dimensions'][:num_objects]
-                # # rots = annotations['rotation_y'][:num_objects]
-                # orient = annotations['orientation'][:num_objects]
-                # rot_lidar = calibration_astyx.get_rot_lidar(orient, calib['T_toLidar'])
-                # # loc_lidar = calib.rect_to_lidar(loc)
-                # loc_lidar = calibration_astyx.get_objects_lidar(loc, calib['T_toLidar'])
-                # l, h, w = dims[:, 0:1], dims[:, 1:2], dims[:, 2:3]
-                # # loc_lidar[:, 2] += h[:, 0] / 2
-                # # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, -(np.pi / 2 + rots[..., np.newaxis])], axis=1)
-                # gt_boxes_lidar = np.concatenate([loc_lidar, l, w, h, rot_lidar], axis=1)
-                for obj in obj_list:
-                    obj.from_radar_to_lidar(calib)
                 gt_boxes_lidar = np.array([[*obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
