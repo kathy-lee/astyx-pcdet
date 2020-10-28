@@ -81,7 +81,7 @@ class Object3dAstyx(object):
         y_corners = [l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2]
         z_corners = [h / 2, h / 2, h / 2, h / 2, -h / 2, -h / 2, -h / 2, -h / 2]
         # rotate and translate 3d bounding box
-        R = quat_to_rot(self.orient)
+        R = quat_to_rotmat(self.orient)
         bbox = np.vstack([x_corners, y_corners, z_corners])
         bbox = np.dot(R, bbox)
         bbox = bbox + self.loc[:, np.newaxis]
@@ -105,25 +105,18 @@ class Object3dAstyx(object):
         loc_camera += calib['T_from_radar_to_camera'][0:3, 3]
         self.loc_camera = np.transpose(loc_camera)
 
-        T = quat_to_rot(self.orient)
+        T = quat_to_rotmat(self.orient)
         T = np.dot(calib['T_from_radar_to_camera'][:, 0:3], T)
-        self.rot_camera = rot_to_angle(T)[1]
+        self.rot_camera = rotmat_to_angle(T)[1]
 
     def from_radar_to_lidar(self, calib):
         loc_lidar = np.dot(calib['T_from_radar_to_lidar'][0:3, 0:3], np.transpose(self.loc))
         loc_lidar += calib['T_from_radar_to_lidar'][0:3, 3]
         self.loc_lidar = np.transpose(loc_lidar)
 
-        T = quat_to_rot(self.orient)
+        T = quat_to_rotmat(self.orient)
         T = np.dot(calib['T_from_radar_to_lidar'][:, 0:3], T)
-        self.rot_lidar = rot_to_angle(T)[2]
-
-    def from_lidar_to_camera(self, calib):
-        loc_radar = np.dot(calib['T_from_lidar_to_radar'][0:3, 0:3], np.transpose(self.loc_lidar))
-        loc_radar += calib['T_from_lidar_to_radar'][0:3, 3]
-        self.loc = np.transpose(loc_radar)
-        self.orient = rot_to_quat(self.rot_lidar, 0, 0)
-        self.from_radar_to_camera(calib)
+        self.rot_lidar = rotmat_to_angle(T)[2]
 
     def from_radar_to_image(self, calib):
         corners = self.generate_corners3d()
@@ -137,6 +130,23 @@ class Object3dAstyx(object):
                      min(corners_image[1, :]),
                      max(corners_image[0, :]),
                      max(corners_image[1, :])])
+
+    def from_lidar_to_radar(self, calib):
+        loc_radar = np.dot(calib['T_from_lidar_to_radar'][0:3, 0:3], np.transpose(self.loc_lidar))
+        loc_radar += calib['T_from_lidar_to_radar'][0:3, 3]
+        self.loc = np.transpose(loc_radar)
+        T = angle_to_rotmat(0, 0, self.rot_lidar)
+        T = np.dot(calib['T_from_lidar_to_radar'][:, 0:3], T)
+        self.orient = rotmat_to_quat(T)
+
+    def from_lidar_to_camera(self, calib):
+        self.from_lidar_to_radar(self, calib)
+        self.from_radar_to_camera(self, calib)
+
+    def from_lidar_to_image(self, calib):
+        self.from_lidar_to_radar(self, calib)
+        self.from_radar_to_image(self, calib)
+
 
 
 def rot_to_quat(yaw, pitch, roll):
@@ -163,7 +173,7 @@ def inv_trans(T):
     return Q
 
 
-def quat_to_rot(quat):
+def quat_to_rotmat(quat):
     m = np.sum(np.multiply(quat, quat))
     q = quat.copy()
     q = np.array(q)
@@ -186,8 +196,33 @@ def quat_to_rot(quat):
     return rot_matrix
 
 
-def rot_to_angle(T):
+def rotmat_to_quat(T):
+    w = math.sqrt(1.0 + T[0,0] + T[1,1] + T[2,2]) / 2.0
+    x = (T[2,1] - T[1,2]) / (4*w)
+    y = (T[0,2] - T[2,0]) / (4*w)
+    z = (T[1,0] - T[0,1]) / (4*w)
+    return [w, x, y, z]
+
+def rotmat_to_angle(T):
     rot_x = math.atan2(T[2,1], T[2, 2])
     rot_y = math.atan2(-T[2,0], math.sqrt(T[2, 1]*T[2, 1] + T[2, 2]*T[2, 2]))
     rot_z = math.atan2(T[1, 0], T[0, 0])
     return [rot_x, rot_y, rot_z]
+
+
+def angle_to_rotmat(rot_x, rot_y, rot_z):
+    T_x = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, np.cos(rot_x), -np.sin(rot_x)],
+            [0.0, np.sin(rot_x), np.cos(rot_x)]])
+    T_y = np.array([
+            [np.cos(rot_y), 0.0, np.sin(rot_y)],
+            [0.0, 1.0, 0.0],
+            [-np.sin(rot_y), 0.0, np.cos(rot_y)]])
+    T_z = np.array([
+            [np.cos(rot_z), -np.sin(rot_z), 0.0],
+            [np.sin(rot_z), np.cos(rot_z), 0.0],
+            [0.0, 0.0, 1.0]])
+    T = np.dot(T_z, T_y)
+    T = np.dot(T, T_x)
+    return T

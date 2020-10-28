@@ -300,7 +300,7 @@ class AstyxDataset(DatasetTemplate):
                 pred_dict['rotation_y'][i] = np.array(obj.rot_camera)
                 # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
                 pred_dict['alpha'][i] = -np.arctan2(obj.loc_lidar[1], obj.loc_lidar[0]) + obj.rot_camera
-                obj.from_camera_to_image(calib)
+                obj.from_lidar_to_image(calib)
                 pred_dict['bbox'][i, :] = np.array(obj.box2d)
 
             pred_dict['name'] = np.array(class_names)[pred_labels - 1]
