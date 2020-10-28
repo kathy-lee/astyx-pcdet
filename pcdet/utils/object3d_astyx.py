@@ -125,12 +125,18 @@ class Object3dAstyx(object):
         self.orient = rot_to_quat(self.rot_lidar, 0, 0)
         self.from_radar_to_camera(calib)
 
-    def from_camera_to_image(self, calib):
+    def from_radar_to_image(self, calib):
         corners = self.generate_corners3d()
-        bbox_image = np.dot(calib['K'], corners)
-        bbox_image = bbox_image / bbox_image[2, :]
-        bbox_image = np.delete(bbox_image, 2, 0)
-        self.box2d = np.array([*bbox_image[:, 0], *bbox_image[:,4]])
+        corners_camera = np.dot(calib['T_from_radar_to_camera'][0:3, 0:3], corners)
+        corners_camera += calib['T_from_radar_to_camera'][0:3, 3][:, np.newaxis]
+        corners_image = np.dot(calib['K'], corners_camera)
+        corners_image = corners_image / corners_image[2, :]
+        corners_image = np.delete(corners_image, 2, 0)
+        self.box2d = np.array([
+                     min(corners_image[0, :]),
+                     min(corners_image[1, :]),
+                     max(corners_image[0, :]),
+                     max(corners_image[1, :])])
 
 
 def rot_to_quat(yaw, pitch, roll):

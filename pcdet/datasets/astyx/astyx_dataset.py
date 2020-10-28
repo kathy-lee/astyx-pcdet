@@ -152,7 +152,7 @@ class AstyxDataset(DatasetTemplate):
                 obj_list = self.get_label(sample_idx)
                 for obj in obj_list:
                     obj.from_radar_to_camera(calib)
-                    obj.from_camera_to_image(calib)
+                    obj.from_radar_to_image(calib)
                     obj.from_radar_to_lidar(calib)
 
                 annotations = {'name': np.array([obj.cls_type for obj in obj_list]),
