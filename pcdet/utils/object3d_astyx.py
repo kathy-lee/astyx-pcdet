@@ -140,12 +140,12 @@ class Object3dAstyx(object):
         self.orient = rotmat_to_quat(T)
 
     def from_lidar_to_camera(self, calib):
-        self.from_lidar_to_radar(self, calib)
-        self.from_radar_to_camera(self, calib)
+        self.from_lidar_to_radar(calib)
+        self.from_radar_to_camera(calib)
 
     def from_lidar_to_image(self, calib):
-        self.from_lidar_to_radar(self, calib)
-        self.from_radar_to_image(self, calib)
+        self.from_lidar_to_radar(calib)
+        self.from_radar_to_image(calib)
 
 
 
@@ -202,6 +202,7 @@ def rotmat_to_quat(T):
     y = (T[0,2] - T[2,0]) / (4*w)
     z = (T[1,0] - T[0,1]) / (4*w)
     return [w, x, y, z]
+
 
 def rotmat_to_angle(T):
     rot_x = math.atan2(T[2,1], T[2, 2])
