@@ -171,7 +171,7 @@ class AstyxDataset(DatasetTemplate):
                 num_gt = len(annotations['name'])
                 index = list(range(num_objects)) + [-1] * (num_gt - num_objects)
                 annotations['index'] = np.array(index, dtype=np.int32)
-                gt_boxes_lidar = np.array([[*obj.loc_lidar, obj.l, obj.h, obj.w, obj.rot_lidar] for obj in obj_list])
+                gt_boxes_lidar = np.array([[*obj.loc_lidar, obj.w, obj.l, obj.h, obj.rot_lidar] for obj in obj_list])
                 annotations['gt_boxes_lidar'] = gt_boxes_lidar
 
                 info['annos'] = annotations
@@ -377,7 +377,6 @@ class AstyxDataset(DatasetTemplate):
         sample_idx = info['point_cloud']['lidar_idx']
 
         points = self.get_lidar(sample_idx)
-        # calib = self.get_calib(sample_idx)
         calib = info['calib']
 
         img_shape = info['image']['image_shape']
