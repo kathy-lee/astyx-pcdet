@@ -412,7 +412,7 @@ class AstyxDataset(DatasetTemplate):
 
         info = copy.deepcopy(self.astyx_infos[index])
 
-        sample_idx = info['point_cloud']['radar_idx']
+        sample_idx = info['point_cloud']['pc_idx']
 
         points = self.get_pointcloud(sample_idx, self.pc_type)
         calib = info['calib']
@@ -442,11 +442,11 @@ class AstyxDataset(DatasetTemplate):
             # loc, dims, rots = annos['location'], annos['dimensions'], annos['orientation']
             # gt_boxes_camera = np.concatenate([loc, dims, rots[..., np.newaxis]], axis=1).astype(np.float32)
             # gt_boxes_lidar = box_utils.boxes3d_kitti_camera_to_lidar(gt_boxes_camera, calib)
-            gt_boxes_radar = annos['gt_boxes_radar']
+            gt_boxes = annos['gt_boxes']
 
             input_dict.update({
                 'gt_names': gt_names,
-                'gt_boxes': gt_boxes_radar
+                'gt_boxes': gt_boxes
             })
             road_plane = self.get_road_plane(sample_idx)
             if road_plane is not None:
