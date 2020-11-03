@@ -7,7 +7,7 @@ from skimage import io
 
 from ...ops.roiaware_pool3d import roiaware_pool3d_utils
 from ...utils import box_utils, common_utils
-from ...utils.object3d_astyx import Object3dAstyx, inv_trans
+from .object3d_astyx import Object3dAstyx, inv_trans
 from ..dataset import DatasetTemplate
 
 
@@ -32,6 +32,8 @@ class AstyxDataset(DatasetTemplate):
 
         self.astyx_infos = []
         self.include_astyx_data(self.mode)
+
+        self.pc_type = self.dataset_cfg.POINT_CLOUD_TYPE[0]
 
     def include_astyx_data(self, mode):
         if self.logger is not None:
@@ -66,6 +68,23 @@ class AstyxDataset(DatasetTemplate):
         lidar_file = self.root_split_path / 'lidar_vlp16' / ('%s.txt' % idx)
         assert lidar_file.exists()
         return np.loadtxt(str(lidar_file), dtype=np.float32, skiprows=1, usecols=(0,1,2,3))
+
+    def get_radar(self, idx):
+        radar_file = self.root_split_path / 'radar_6455' / ('%s.txt' % idx)
+        assert radar_file.exists()
+        return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0,1,2,3))
+
+    def get_pointcloud(self, idx, pc_type):
+        if pc_type == 'lidar':
+            lidar_file = self.root_split_path / 'lidar_vlp16' / ('%s.txt' % idx)
+            assert lidar_file.exists()
+            return np.loadtxt(str(lidar_file), dtype=np.float32, skiprows=1, usecols=(0, 1, 2, 3))
+        elif pc_type == 'radar':
+            radar_file = self.root_split_path / 'radar_6455' / ('%s.txt' % idx)
+            assert radar_file.exists()
+            return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3))
+        else:
+            pass
 
     def get_image_shape(self, idx):
         img_file = self.root_split_path / 'camera_front' / ('%s.jpg' % idx)
@@ -140,7 +159,7 @@ class AstyxDataset(DatasetTemplate):
         def process_single_scene(sample_idx):
             print('%s sample_idx: %s' % (self.split, sample_idx))
             info = {}
-            pc_info = {'num_features': 4, 'lidar_idx': sample_idx}
+            pc_info = {'num_features': 4, 'pc_idx': sample_idx}
             info['point_cloud'] = pc_info
 
             image_info = {'image_idx': sample_idx, 'image_shape': self.get_image_shape(sample_idx)}
@@ -153,11 +172,25 @@ class AstyxDataset(DatasetTemplate):
                 for obj in obj_list:
                     obj.from_radar_to_camera(calib)
                     obj.from_radar_to_image(calib)
-                    obj.from_radar_to_lidar(calib)
+                    ###############################
+                    # print(f'\n%s:' % sample_idx)
+                    #
+                    # # print(obj.loc, obj.orient)
+                    # # obj.from_lidar_to_radar(calib)
+                    # # print(obj.loc, obj.orient)
+                    #
+                    # # print(obj.loc_camera, obj.rot_camera)
+                    # # obj.from_lidar_to_camera(calib)
+                    # # print(obj.loc_camera, obj.rot_camera)
+                    #
+                    # print(obj.box2d)
+                    # obj.from_lidar_to_image(calib)
+                    # print(obj.box2d)
+                    ###############################
 
                 annotations = {'name': np.array([obj.cls_type for obj in obj_list]),
                                'occluded': np.array([obj.occlusion for obj in obj_list]),
-                               'alpha': np.array([-np.arctan2(obj.loc_lidar[1], obj.loc_lidar[0])
+                               'alpha': np.array([-np.arctan2(obj.loc[1], obj.loc[0])
                                                   + obj.rot_camera for obj in obj_list]),
                                'bbox': np.concatenate([obj.box2d.reshape(1, 4) for obj in obj_list], axis=0),
                                'dimensions': np.array([[obj.l, obj.h, obj.w] for obj in obj_list]),
@@ -171,23 +204,28 @@ class AstyxDataset(DatasetTemplate):
                 num_gt = len(annotations['name'])
                 index = list(range(num_objects)) + [-1] * (num_gt - num_objects)
                 annotations['index'] = np.array(index, dtype=np.int32)
-                gt_boxes_lidar = np.array([[*obj.loc_lidar, obj.w, obj.l, obj.h, obj.rot_lidar] for obj in obj_list])
-                annotations['gt_boxes_lidar'] = gt_boxes_lidar
+                if self.pc_type == 'radar':
+                    gt_boxes = np.array([[*obj.loc, obj.w, obj.l, obj.h, obj.rot] for obj in obj_list])
+                else:
+                    for obj in obj_list:
+                        obj.from_radar_to_lidar(calib)
+                    gt_boxes = np.array([[*obj.loc_lidar, obj.w, obj.l, obj.h, obj.rot_lidar] for obj in obj_list])
+                annotations['gt_boxes'] = gt_boxes
 
                 info['annos'] = annotations
 
                 if count_inside_pts:
-                    points = self.get_lidar(sample_idx)
+                    points = self.get_pointcloud(sample_idx, self.pc_type)
                     calib = self.get_calib(sample_idx)
                     #pts_rect = calib.lidar_to_rect(points[:, 0:3])
 
                     #fov_flag = self.get_fov_flag(pts_rect, info['image']['image_shape'], calib)
                     #pts_fov = points[fov_flag]
-                    corners_lidar = box_utils.boxes_to_corners_3d(gt_boxes_lidar)
+                    corners = box_utils.boxes_to_corners_3d(gt_boxes)
                     num_points_in_gt = -np.ones(num_gt, dtype=np.int32)
 
                     for k in range(num_objects):
-                        flag = box_utils.in_hull(points[:, 0:3], corners_lidar[k])
+                        flag = box_utils.in_hull(points[:, 0:3], corners[k])
                         num_points_in_gt[k] = flag.sum()
                     annotations['num_points_in_gt'] = num_points_in_gt
 
@@ -213,13 +251,13 @@ class AstyxDataset(DatasetTemplate):
         for k in range(len(infos)):
             print('gt_database sample: %d/%d' % (k + 1, len(infos)))
             info = infos[k]
-            sample_idx = info['point_cloud']['lidar_idx']
-            points = self.get_lidar(sample_idx)
+            sample_idx = info['point_cloud']['pc_idx']
+            points = self.get_pointcloud(sample_idx, self.pc_type)
             annos = info['annos']
             names = annos['name']
             difficulty = annos['difficulty']
             bbox = annos['bbox']
-            gt_boxes = annos['gt_boxes_lidar']
+            gt_boxes = annos['gt_boxes']
 
             num_obj = gt_boxes.shape[0]
             point_indices = roiaware_pool3d_utils.points_in_boxes_cpu(
@@ -250,8 +288,7 @@ class AstyxDataset(DatasetTemplate):
         with open(db_info_save_path, 'wb') as f:
             pickle.dump(all_db_infos, f)
 
-    @staticmethod
-    def generate_prediction_dicts(batch_dict, pred_dicts, class_names, output_path=None):
+    def generate_prediction_dicts(self, batch_dict, pred_dicts, class_names, output_path=None):
         """
         Args:
             batch_dict:
@@ -272,7 +309,7 @@ class AstyxDataset(DatasetTemplate):
                 'occluded': np.zeros(num_samples), 'alpha': np.zeros(num_samples),
                 'bbox': np.zeros([num_samples, 4]), 'dimensions': np.zeros([num_samples, 3]),
                 'location': np.zeros([num_samples, 3]), 'rotation_y': np.zeros(num_samples),
-                'score': np.zeros(num_samples), 'boxes_lidar': np.zeros([num_samples, 7])
+                'score': np.zeros(num_samples), 'boxes_3d': np.zeros([num_samples, 7])
             }
             return ret_dict
 
@@ -287,25 +324,26 @@ class AstyxDataset(DatasetTemplate):
             calib = batch_dict['calib'][batch_index]
             image_shape = batch_dict['image_shape'][batch_index]
 
-            # pred_boxes_camera = box_utils.boxes3d_lidar_to_kitti_camera(pred_boxes, calib)
-            # pred_boxes_img = box_utils.boxes3d_kitti_camera_to_imageboxes(
-            #     pred_boxes_camera, calib, image_shape=image_shape
-            # )
-            obj_list = [Object3dAstyx.from_prediction(box,label,score) for box,label,score
+            obj_list = [Object3dAstyx.from_prediction(box, label, score, self.pc_type) for box, label, score
                         in zip(pred_boxes,pred_labels,pred_scores)]
             for i, obj in enumerate(obj_list):
-                obj.from_lidar_to_camera(calib)
+                if self.pc_type == 'radar':
+                    obj.from_radar_to_camera(calib)
+                    obj.from_radar_to_image(calib)
+                    loc = obj.loc
+                else:
+                    obj.from_lidar_to_camera(calib)
+                    obj.from_lidar_to_image(calib)
+                    loc = obj.loc_lidar
                 pred_dict['dimensions'][i, :] = np.array([obj.l, obj.h, obj.w])
                 pred_dict['location'][i, :] = np.array(obj.loc_camera)
                 pred_dict['rotation_y'][i] = np.array(obj.rot_camera)
-                # pred_dict['alpha'] = -np.arctan2(-pred_boxes[:, 1], pred_boxes[:, 0]) + pred_boxes_camera[:, 6]
-                pred_dict['alpha'][i] = -np.arctan2(obj.loc_lidar[1], obj.loc_lidar[0]) + obj.rot_camera
-                obj.from_lidar_to_image(calib)
+                pred_dict['alpha'][i] = -np.arctan2(loc[1], loc[0]) + obj.rot_camera
                 pred_dict['bbox'][i, :] = np.array(obj.box2d)
 
             pred_dict['name'] = np.array(class_names)[pred_labels - 1]
             pred_dict['score'] = pred_scores
-            pred_dict['boxes_lidar'] = pred_boxes
+            pred_dict['boxes_3d'] = pred_boxes
 
             return pred_dict
 
@@ -374,9 +412,9 @@ class AstyxDataset(DatasetTemplate):
 
         info = copy.deepcopy(self.astyx_infos[index])
 
-        sample_idx = info['point_cloud']['lidar_idx']
+        sample_idx = info['point_cloud']['radar_idx']
 
-        points = self.get_lidar(sample_idx)
+        points = self.get_pointcloud(sample_idx, self.pc_type)
         calib = info['calib']
 
         img_shape = info['image']['image_shape']
@@ -404,11 +442,11 @@ class AstyxDataset(DatasetTemplate):
             # loc, dims, rots = annos['location'], annos['dimensions'], annos['orientation']
             # gt_boxes_camera = np.concatenate([loc, dims, rots[..., np.newaxis]], axis=1).astype(np.float32)
             # gt_boxes_lidar = box_utils.boxes3d_kitti_camera_to_lidar(gt_boxes_camera, calib)
-            gt_boxes_lidar = annos['gt_boxes_lidar']
+            gt_boxes_radar = annos['gt_boxes_radar']
 
             input_dict.update({
                 'gt_names': gt_names,
-                'gt_boxes': gt_boxes_lidar
+                'gt_boxes': gt_boxes_radar
             })
             road_plane = self.get_road_plane(sample_idx)
             if road_plane is not None:
