@@ -33,7 +33,11 @@ class AstyxDataset(DatasetTemplate):
         self.astyx_infos = []
         self.include_astyx_data(self.mode)
 
-        self.pc_type = self.dataset_cfg.POINT_CLOUD_TYPE[0]
+        #self.pc_type = self.dataset_cfg.POINT_CLOUD_TYPE[0]
+        if 'radar' in self.dataset_cfg.POINT_CLOUD_TYPE and 'lidar' in self.dataset_cfg.POINT_CLOUD_TYPE :
+            self.pc_type = 'fusion'
+        else:
+            self.pc_type = self.dataset_cfg.POINT_CLOUD_TYPE[0]
 
     def include_astyx_data(self, mode):
         if self.logger is not None:
@@ -82,7 +86,7 @@ class AstyxDataset(DatasetTemplate):
         elif pc_type == 'radar':
             radar_file = self.root_split_path / 'radar_6455' / ('%s.txt' % idx)
             assert radar_file.exists()
-            return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3))
+            return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 4))
         else:
             pass
 
