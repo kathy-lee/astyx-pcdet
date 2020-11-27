@@ -5,5 +5,8 @@ output/
 data/astyx/testing
 data/astyx/training
 data/kitti/gt_database/
+data/astyx/gt_database/
+*.pkl
+pcdet/version.py
 pcdet.egg-info/
 *.so
