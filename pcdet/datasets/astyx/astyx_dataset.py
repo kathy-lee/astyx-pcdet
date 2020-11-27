@@ -416,6 +416,12 @@ class AstyxDataset(DatasetTemplate):
 
         info = copy.deepcopy(self.astyx_infos[index])
 
+        ##################################################################
+        # print(f'info annos:')
+        # print(len(info['point_cloud']))
+        # for key, value in info['point_cloud'].items():
+        #     print(key)
+        #################################################################
         sample_idx = info['point_cloud']['pc_idx']
 
         points = self.get_pointcloud(sample_idx, self.pc_type)
