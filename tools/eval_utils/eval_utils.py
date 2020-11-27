@@ -55,6 +55,14 @@ def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, sa
         load_data_to_gpu(batch_dict)
         with torch.no_grad():
             pred_dicts, ret_dict = model(batch_dict)
+            #############################################################
+            # print(f'pred_dicts length: %d' % len(pred_dicts))
+            # for key, value in pred_dicts[0].items():
+            #     print(key, type(value), value.shape)
+            # print(f'ret_dict length: %d' % len(ret_dict))
+            # for key, value in ret_dict[0].items():
+            #     print(key, type(value), value.shape)
+            #############################################################
         disp_dict = {}
 
         statistics_info(cfg, ret_dict, metric, disp_dict)
