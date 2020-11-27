@@ -89,13 +89,24 @@ class BaseBEVBackbone(nn.Module):
         ups = []
         ret_dict = {}
         x = spatial_features
+        #print(x.size()) ###
         for i in range(len(self.blocks)):
             x = self.blocks[i](x)
-
+            ########################################
+            #print(f'\nfor loop %d:' % i)###
+            #print(self.blocks[i]) ###
+            #print(x.size()) ###
+            #######################################
             stride = int(spatial_features.shape[2] / x.shape[2])
             ret_dict['spatial_features_%dx' % stride] = x
             if len(self.deblocks) > 0:
                 ups.append(self.deblocks[i](x))
+                ######################################
+                # y=self.deblocks[i](x)
+                # ups.append(y)
+                # print('deblock:')
+                # print(y.size())
+                #####################################
             else:
                 ups.append(x)
 
