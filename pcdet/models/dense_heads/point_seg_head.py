@@ -33,14 +33,18 @@ class SoftmaxFocalClassificationLoss(nn.Module):
         Returns:
             weighted_loss: (B, #anchors, #classes) float tensor after weighting.
         """
-        pred_sigmoid = torch.softmax(input)
+        softmax = nn.Softmax(dim=1)
+        pred_sigmoid = softmax(input)
         alpha_weight = target * self.alpha + (1 - target) * (1 - self.alpha)
         pt = target * (1.0 - pred_sigmoid) + (1.0 - target) * pred_sigmoid
         focal_weight = alpha_weight * torch.pow(pt, self.gamma)
 
-        bce_loss = torch.nn.functional.cross_entropy(input, target)
+        #bce_loss = nn.functional.cross_entropy(input, target.to(torch.int64))
+        loss = nn.CrossEntropyLoss()
+        labels = torch.argmax(target, dim=1)
+        ce_loss = loss(input, labels)
 
-        loss = focal_weight * bce_loss
+        loss = focal_weight * ce_loss
 
         if weights.shape.__len__() == 2 or \
                 (weights.shape.__len__() == 1 and target.shape.__len__() == 2):
@@ -127,15 +131,15 @@ class PointSegHead(PointHeadTemplate):
             'point_cls_preds': point_cls_preds,
         }
 
-        point_cls_scores = torch.softmax(point_cls_preds)
+        softmax = nn.Softmax(dim=1)
+        point_cls_scores = softmax(point_cls_preds)
         batch_dict['point_cls_scores'], _ = point_cls_scores.max(dim=-1)
 
         if self.training:
             targets_dict = self.assign_targets(batch_dict)
             ret_dict['point_cls_labels'] = targets_dict['point_cls_labels']
         self.forward_ret_dict = ret_dict
-        print(f'after assign points cls: ')
-        print(ret_dict['point_class_labels'])
+
         return batch_dict
 
     def build_losses(self, losses_cfg):
