@@ -20,7 +20,7 @@ DATA_CONFIG:
             }
 
 MODEL:
-    NAME: PointRCNN
+    NAME: PointNetSeg
 
     BACKBONE_3D:
         NAME: PointNet2MSG
@@ -38,7 +38,7 @@ MODEL:
       NAME: PointSegHead
       CLS_FC: [ 256, 4 ]
       CLASS_AGNOSTIC: False
-      USE_POINT_FEATURES_BEFORE_FUSION: True
+      USE_POINT_FEATURES_BEFORE_FUSION: False
       TARGET_CONFIG:
         GT_EXTRA_WIDTH: [ 0.2, 0.2, 0.2 ]
       LOSS_CONFIG:
