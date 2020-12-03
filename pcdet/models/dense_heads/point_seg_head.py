@@ -57,9 +57,8 @@ class SoftmaxFocalClassificationLoss(nn.Module):
 
 class PointSegHead(PointHeadTemplate):
     """
-    A simple point-based segmentation head, which are used for PV-RCNN keypoint segmentaion.
-    Reference Paper: https://arxiv.org/abs/1912.13192
-    PV-RCNN: Point-Voxel Feature Set Abstraction for 3D Object Detection
+    A point segmentation head.
+    Reference Paper: https://arxiv.org/abs/1706.02413
     """
     def __init__(self, num_class, input_channels, model_cfg, **kwargs):
         super().__init__(model_cfg=model_cfg, num_class=num_class)
@@ -79,7 +78,6 @@ class PointSegHead(PointHeadTemplate):
                 gt_boxes (optional): (B, M, 8)
         Returns:
             point_cls_labels: (N1 + N2 + N3 + ...), long type, 0:background, -1:ignored
-            point_part_labels: (N1 + N2 + N3 + ..., 3)
         """
         point_coords = input_dict['point_coords']
         gt_boxes = input_dict['gt_boxes']
@@ -119,7 +117,6 @@ class PointSegHead(PointHeadTemplate):
         Returns:
             batch_dict:
                 point_cls_scores: (N1 + N2 + N3 + ..., 1)
-                point_part_offset: (N1 + N2 + N3 + ..., 3)
         """
         if self.model_cfg.get('USE_POINT_FEATURES_BEFORE_FUSION', False):
             point_features = batch_dict['point_features_before_fusion']
@@ -128,7 +125,7 @@ class PointSegHead(PointHeadTemplate):
         point_cls_preds = self.cls_layers(point_features)  # (total_points, num_class)
 
         ret_dict = {
-            'point_cls_preds': point_cls_preds,
+            'point_cls_preds': point_cls_preds
         }
 
         softmax = nn.Softmax(dim=1)
