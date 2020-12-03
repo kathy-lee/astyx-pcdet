@@ -129,5 +129,69 @@ def eval_one_epoch(cfg, model, dataloader, epoch_id, logger, dist_test=False, sa
     return ret_dict
 
 
+def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False, save_to_file=False, result_dir=None):
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    final_output_dir = result_dir / 'final_result' / 'data'
+    if save_to_file:
+        final_output_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset = dataloader.dataset
+    class_names = dataset.class_names
+    det_annos = []
+
+    logger.info('*************** EPOCH %s EVALUATION *****************' % epoch_id)
+    if dist_test:
+        num_gpus = torch.cuda.device_count()
+        local_rank = cfg.LOCAL_RANK % num_gpus
+        model = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[local_rank],
+                broadcast_buffers=False
+        )
+    model.eval()
+
+    if cfg.LOCAL_RANK == 0:
+        progress_bar = tqdm.tqdm(total=len(dataloader), leave=True, desc='eval', dynamic_ncols=True)
+    start_time = time.time()
+    for i, batch_dict in enumerate(dataloader):
+        load_data_to_gpu(batch_dict)
+        with torch.no_grad():
+            pred_dict = model(batch_dict)
+            #############################################################
+            # print(f'pred_dicts length: %d' % len(pred_dicts))
+            # for key, value in pred_dicts[0].items():
+            #     print(key, type(value), value.shape)
+            # print(f'ret_dict length: %d' % len(ret_dict))
+            # for key, value in ret_dict[0].items():
+            #     print(key, type(value), value.shape)
+            #############################################################
+        det_annos += pred_dict
+
+    logger.info('*************** Performance of EPOCH %s *****************' % epoch_id)
+    sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
+    logger.info('Generate label finished(sec_per_example: %.4f second).' % sec_per_example)
+
+    if cfg.LOCAL_RANK != 0:
+        return {}
+
+    with open(result_dir / 'result.pkl', 'wb') as f:
+        pickle.dump(det_annos, f)
+
+    result_str, result_dict = point_seg_evaluation(det_annos, class_names, output_path=final_output_dir)
+
+    logger.info(result_str)
+    #ret_dict.update(result_dict)
+
+    logger.info('Result is save to %s' % result_dir)
+    logger.info('****************Evaluation done.*****************')
+    return result_dict
+
+def point_seg_evaluation():
+    result_str = ''
+    result_dict = {}
+    return result_str, result_dict
+
+
 if __name__ == '__main__':
     pass
