@@ -139,6 +139,8 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     dataset = dataloader.dataset
     class_names = dataset.class_names
     det_annos = []
+    print('dataset length:')
+    print(len(dataloader.dataset))
 
     logger.info('*************** EPOCH %s EVALUATION *****************' % epoch_id)
     if dist_test:
@@ -156,6 +158,8 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     start_time = time.time()
     for i, batch_dict in enumerate(dataloader):
         load_data_to_gpu(batch_dict)
+        print('length of batch dict before forward:')
+        print(len(batch_dict))
         with torch.no_grad():
             pred_dict = model(batch_dict)
             #############################################################
@@ -166,7 +170,15 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
             # for key, value in ret_dict[0].items():
             #     print(key, type(value), value.shape)
             #############################################################
-        det_annos += pred_dict
+            print('length of result after forward:')
+            print(i, len(pred_dict))
+            annos = generate_pred_per_batch(pred_dict)
+            # for key, value in pred_dict.items():
+            #     print(key, type(value))
+        det_annos += annos
+
+    print('det_annos length:')
+    print(len(det_annos))
 
     logger.info('*************** Performance of EPOCH %s *****************' % epoch_id)
     sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
@@ -187,7 +199,21 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     logger.info('****************Evaluation done.*****************')
     return result_dict
 
-def point_seg_evaluation():
+
+def generate_pred_per_batch(pred_dict):
+    pred_list = []
+    for i in range(pred_dict['batch_size']):
+        pred_list[i] = {
+            'frame_id': pred_dict['frame_id'][i],
+            'point_coords': pred_dict['point_coords'][i],
+            'calib': pred_dict['calib'][i],
+            'gt_boxes': pred_dict['gt_boxes'][i],
+            'point_cls_scores': pred_dict['point_cls_scores'][i]
+        }
+    return pred_list
+
+
+def point_seg_evaluation(det_dicts, classnames, output_path):
     result_str = ''
     result_dict = {}
     return result_str, result_dict
