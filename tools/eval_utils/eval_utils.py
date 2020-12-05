@@ -162,19 +162,19 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
         print(len(batch_dict))
         with torch.no_grad():
             pred_dict = model(batch_dict)
-            #############################################################
-            # print(f'pred_dicts length: %d' % len(pred_dicts))
-            # for key, value in pred_dicts[0].items():
-            #     print(key, type(value), value.shape)
-            # print(f'ret_dict length: %d' % len(ret_dict))
-            # for key, value in ret_dict[0].items():
-            #     print(key, type(value), value.shape)
-            #############################################################
             print('length of result after forward:')
             print(i, len(pred_dict))
-            annos = generate_pred_per_batch(pred_dict)
             # for key, value in pred_dict.items():
             #     print(key, type(value))
+        annos = []
+        for i in range(pred_dict['batch_size']):
+            annos[i] = {
+                'frame_id': pred_dict['frame_id'][i],
+                'point_coords': pred_dict['point_coords'][i],
+                'calib': pred_dict['calib'][i],
+                'gt_boxes': pred_dict['gt_boxes'][i],
+                'point_cls_scores': pred_dict['point_cls_scores'][i]
+            }
         det_annos += annos
 
     print('det_annos length:')
@@ -200,22 +200,30 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     return result_dict
 
 
-def generate_pred_per_batch(pred_dict):
-    pred_list = []
-    for i in range(pred_dict['batch_size']):
-        pred_list[i] = {
-            'frame_id': pred_dict['frame_id'][i],
-            'point_coords': pred_dict['point_coords'][i],
-            'calib': pred_dict['calib'][i],
-            'gt_boxes': pred_dict['gt_boxes'][i],
-            'point_cls_scores': pred_dict['point_cls_scores'][i]
-        }
-    return pred_list
-
-
 def point_seg_evaluation(det_dicts, classnames, output_path):
     result_str = ''
     result_dict = {}
+    total_correct = 0
+    total_seen = 0
+    total_correct_class = [0 for _ in range(classnames)]
+    total_seen_class = [0 for _ in range(classnames)]
+    total_iou_class = [0 for _ in range(classnames)]
+    for det in det_dicts:
+        point_cls_label = generate_seg_label(det['frame_id'], det['point_coords'], det['gt_boxes'])
+        total_correct += np.sum(det['point_cls_scores'] == point_cls_label)
+        for i in range(classnames):
+            total_seen_class[i] += np.sum((point_cls_label == i))
+            total_correct_class[l] += np.sum((det['point_cls_scores'] == i) & (point_cls_label == i ))
+            total_iou_class += np.sum((det['point_cls_scores'] == i) | (point_cls_label == i ))
+    mIoU = np.mean(np.array(total_correct_class)/(np.array(total_iou_class, dtype=np.float) + 1e-6))
+    total_correct /= float(point_cls_label.size)
+    total_correct_class /= np.mean(np.array(total_correct_class)/np.array(total_seen_class), dtype=np.float + 1e-6)
+    result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
+    result_str += print_str((f"point accuracy: {total_correct:.4f}"))
+    result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
+    result_dict['mIoU'] = mIoU
+    result_dict['total_correct'] = total_correct
+    result_dict['total_correct_class'] = total_correct_class
     return result_str, result_dict
 
 
