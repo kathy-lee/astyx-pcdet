@@ -6,7 +6,7 @@ import torch
 import tqdm
 
 from pcdet.models import load_data_to_gpu
-from pcdet.utils import common_utils
+from pcdet.utils import common_utils, box_utils
 
 
 def statistics_info(cfg, ret_dict, metric, disp_dict):
@@ -139,8 +139,6 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     dataset = dataloader.dataset
     class_names = dataset.class_names
     det_annos = []
-    print('dataset length:')
-    print(len(dataloader.dataset))
 
     logger.info('*************** EPOCH %s EVALUATION *****************' % epoch_id)
     if dist_test:
@@ -158,27 +156,25 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     start_time = time.time()
     for i, batch_dict in enumerate(dataloader):
         load_data_to_gpu(batch_dict)
-        print('length of batch dict before forward:')
-        print(len(batch_dict))
         with torch.no_grad():
             pred_dict = model(batch_dict)
-            print('length of result after forward:')
-            print(i, len(pred_dict))
             # for key, value in pred_dict.items():
-            #     print(key, type(value))
+            #     if key != 'batch_size':
+            #         print(key, type(value), value.shape)
+            #     else:
+            #         print(key, value)
         annos = []
-        for i in range(pred_dict['batch_size']):
-            annos[i] = {
-                'frame_id': pred_dict['frame_id'][i],
-                'point_coords': pred_dict['point_coords'][i],
-                'calib': pred_dict['calib'][i],
-                'gt_boxes': pred_dict['gt_boxes'][i],
-                'point_cls_scores': pred_dict['point_cls_scores'][i]
-            }
+        pts_num = int(len(pred_dict['points'])/pred_dict['batch_size'])
+        points = pred_dict['point_coords'].cpu().numpy()
+        gt_boxes = pred_dict['gt_boxes'].cpu().numpy()
+        point_cls_scores = pred_dict['point_cls_scores'].cpu().numpy()
+        for j in range(pred_dict['batch_size']):
+            annos.append({
+                'point_coords': points[j*pts_num:(j+1)*pts_num, :],
+                'gt_boxes': gt_boxes[j],
+                'point_cls_scores': point_cls_scores[j*pts_num:(j+1)*pts_num]
+            })
         det_annos += annos
-
-    print('det_annos length:')
-    print(len(det_annos))
 
     logger.info('*************** Performance of EPOCH %s *****************' % epoch_id)
     sec_per_example = (time.time() - start_time) / len(dataloader.dataset)
@@ -190,7 +186,7 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     with open(result_dir / 'result.pkl', 'wb') as f:
         pickle.dump(det_annos, f)
 
-    result_str, result_dict = point_seg_evaluation(det_annos, class_names, output_path=final_output_dir)
+    result_str, result_dict = point_seg_evaluation(dataset, det_annos, class_names, output_path=final_output_dir)
 
     logger.info(result_str)
     #ret_dict.update(result_dict)
@@ -200,32 +196,55 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     return result_dict
 
 
-def point_seg_evaluation(det_dicts, classnames, output_path):
+def point_seg_evaluation(dataset, det_dicts, classnames, output_path):
     result_str = ''
     result_dict = {}
     total_correct = 0
     total_seen = 0
-    total_correct_class = [0 for _ in range(classnames)]
-    total_seen_class = [0 for _ in range(classnames)]
-    total_iou_class = [0 for _ in range(classnames)]
+    total_correct_class = [0 for _ in classnames]
+    total_seen_class = [0 for _ in classnames]
+    total_iou_class = [0 for _ in classnames]
     for det in det_dicts:
-        point_cls_label = generate_seg_label(det['frame_id'], det['point_coords'], det['gt_boxes'])
-        total_correct += np.sum(det['point_cls_scores'] == point_cls_label)
-        for i in range(classnames):
-            total_seen_class[i] += np.sum((point_cls_label == i))
-            total_correct_class[l] += np.sum((det['point_cls_scores'] == i) & (point_cls_label == i ))
-            total_iou_class += np.sum((det['point_cls_scores'] == i) | (point_cls_label == i ))
+        #point_cls_labels = generate_point_label(det['frame_id'], det['point_coords'], det['gt_boxes'])
+        point_cls_labels = np.zeros((len(det['point_coords'])))
+        for i,box in enumerate(det['gt_boxes']):
+
+            box_dim = box[np.newaxis, :]
+            box_dim = box_dim[:, 0:7]
+            corners = box_utils.boxes_to_corners_3d(box_dim)
+            print(corners.shape)
+            corners = np.squeeze(corners, axis=0)
+            if i == 0:
+                print('box and corners:')
+                print(box)
+                print(corners)
+            flag = box_utils.in_hull(det['point_coords'][:, 1:], corners)
+            point_cls_labels[flag] = int(box[-1])
+        total_correct += np.sum(det['point_cls_scores'] == point_cls_labels)
+        total_seen += det['point_cls_scores'].size
+        for i in range(len(classnames)):
+            total_seen_class[i] += np.sum((point_cls_labels == i))
+            total_correct_class[i] += np.sum((det['point_cls_scores'] == i) & (point_cls_labels == i ))
+            total_iou_class += np.sum((det['point_cls_scores'] == i) | (point_cls_labels == i ))
     mIoU = np.mean(np.array(total_correct_class)/(np.array(total_iou_class, dtype=np.float) + 1e-6))
-    total_correct /= float(point_cls_label.size)
-    total_correct_class /= np.mean(np.array(total_correct_class)/np.array(total_seen_class), dtype=np.float + 1e-6)
-    result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
-    result_str += print_str((f"point accuracy: {total_correct:.4f}"))
-    result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
+    total_correct /= total_seen
+    total_correct_class /= np.mean(np.array(total_correct_class)/np.array(total_seen_class, dtype=np.float) + 1e-6)
+    # result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
+    # result_str += print_str((f"point accuracy: {total_correct:.4f}"))
+    # result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
     result_dict['mIoU'] = mIoU
     result_dict['total_correct'] = total_correct
     result_dict['total_correct_class'] = total_correct_class
     return result_str, result_dict
 
+# def generate_point_label(self, frame_id, points, gt_boxes):
+#     labels = np.zeros((len(points)))
+#     for box in gt_boxes:
+#         corners = box_utils.boxes_to_corners_3d(box)
+#         flag = box_utils.in_hull(points[:, 0:3], corners)
+#         labels[flag] = box[7]
+#
+#     return labels
 
 if __name__ == '__main__':
     pass
