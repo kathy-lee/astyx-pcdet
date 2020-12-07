@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 from ...utils import box_utils
 from .point_head_template import PointHeadTemplate
@@ -130,7 +131,7 @@ class PointSegHead(PointHeadTemplate):
 
         softmax = nn.Softmax(dim=1)
         point_cls_scores = softmax(point_cls_preds)
-        batch_dict['point_cls_scores'], _ = point_cls_scores.max(dim=-1)
+        _, batch_dict['point_cls_scores'] = torch.max(point_cls_scores, 1)
 
         if self.training:
             targets_dict = self.assign_targets(batch_dict)
