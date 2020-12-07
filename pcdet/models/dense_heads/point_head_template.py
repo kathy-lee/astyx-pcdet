@@ -72,8 +72,6 @@ class PointHeadTemplate(nn.Module):
         assert set_ignore_flag != use_ball_constraint, 'Choose one only!'
         batch_size = gt_boxes.shape[0]
         bs_idx = points[:, 0]
-        print(points.shape)
-        print(bs_idx.shape)
         point_cls_labels = points.new_zeros(points.shape[0]).long()
         point_box_labels = gt_boxes.new_zeros((points.shape[0], 8)) if ret_box_labels else None
         point_part_labels = gt_boxes.new_zeros((points.shape[0], 3)) if ret_part_labels else None
