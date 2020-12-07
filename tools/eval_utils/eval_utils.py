@@ -7,6 +7,7 @@ import tqdm
 
 from pcdet.models import load_data_to_gpu
 from pcdet.utils import common_utils, box_utils
+from pcdet.datasets.kitti.kitti_object_eval_python.eval import print_str
 
 
 def statistics_info(cfg, ret_dict, metric, disp_dict):
@@ -169,9 +170,11 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
         gt_boxes = pred_dict['gt_boxes'].cpu().numpy()
         point_cls_scores = pred_dict['point_cls_scores'].cpu().numpy()
         for j in range(pred_dict['batch_size']):
+            boxes = gt_boxes[j]
+            boxes = boxes[~np.all(boxes == 0, axis=1)]
             annos.append({
                 'point_coords': points[j*pts_num:(j+1)*pts_num, :],
-                'gt_boxes': gt_boxes[j],
+                'gt_boxes': boxes,
                 'point_cls_scores': point_cls_scores[j*pts_num:(j+1)*pts_num]
             })
         det_annos += annos
@@ -208,43 +211,35 @@ def point_seg_evaluation(dataset, det_dicts, classnames, output_path):
         #point_cls_labels = generate_point_label(det['frame_id'], det['point_coords'], det['gt_boxes'])
         point_cls_labels = np.zeros((len(det['point_coords'])))
         for i,box in enumerate(det['gt_boxes']):
-
             box_dim = box[np.newaxis, :]
             box_dim = box_dim[:, 0:7]
             corners = box_utils.boxes_to_corners_3d(box_dim)
-            print(corners.shape)
             corners = np.squeeze(corners, axis=0)
-            if i == 0:
-                print('box and corners:')
-                print(box)
-                print(corners)
             flag = box_utils.in_hull(det['point_coords'][:, 1:], corners)
             point_cls_labels[flag] = int(box[-1])
         total_correct += np.sum(det['point_cls_scores'] == point_cls_labels)
         total_seen += det['point_cls_scores'].size
         for i in range(len(classnames)):
-            total_seen_class[i] += np.sum((point_cls_labels == i))
-            total_correct_class[i] += np.sum((det['point_cls_scores'] == i) & (point_cls_labels == i ))
-            total_iou_class += np.sum((det['point_cls_scores'] == i) | (point_cls_labels == i ))
+            total_seen_class[i] += np.sum((point_cls_labels == i+1))
+            total_correct_class[i] += np.sum((det['point_cls_scores'] == i+1) & (point_cls_labels == i+1))
+            total_iou_class += np.sum((det['point_cls_scores'] == i+1) | (point_cls_labels == i+1))
     mIoU = np.mean(np.array(total_correct_class)/(np.array(total_iou_class, dtype=np.float) + 1e-6))
     total_correct /= total_seen
-    total_correct_class /= np.mean(np.array(total_correct_class)/np.array(total_seen_class, dtype=np.float) + 1e-6)
-    # result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
-    # result_str += print_str((f"point accuracy: {total_correct:.4f}"))
-    # result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
+    #total_correct_class /= np.mean(np.array(total_correct_class)/(np.array(total_seen_class, dtype=np.float) + 1e-6))
+    result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
+    result_str += print_str((f"point accuracy: {total_correct:.4f}"))
+    #result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
+    result_str += print_str(f"car acc: {total_correct_class[0]/total_seen_class[0]:.4f}")
+    result_str += print_str(f"Pedestrian acc: {total_correct_class[1] / total_seen_class[1]:.4f}")
+    result_str += print_str(f"Cyclist acc: {total_correct_class[2] / total_seen_class[2]:.4f}")
+
     result_dict['mIoU'] = mIoU
-    result_dict['total_correct'] = total_correct
-    result_dict['total_correct_class'] = total_correct_class
+    result_dict['avg_acc'] = total_correct
+    result_dict['avg_car_acc'] = total_correct_class[0]/total_seen_class[0]
+    result_dict['avg_ped_acc'] = total_correct_class[1] / total_seen_class[1]
+    result_dict['avg_cyc_acc'] = total_correct_class[2] / total_seen_class[2]
     return result_str, result_dict
 
-# def generate_point_label(self, frame_id, points, gt_boxes):
-#     labels = np.zeros((len(points)))
-#     for box in gt_boxes:
-#         corners = box_utils.boxes_to_corners_3d(box)
-#         flag = box_utils.in_hull(points[:, 0:3], corners)
-#         labels[flag] = box[7]
-#
-#     return labels
 
 if __name__ == '__main__':
     pass
