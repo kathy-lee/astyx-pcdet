@@ -66,7 +66,7 @@ class PointSegHead(PointHeadTemplate):
         self.cls_layers = self.make_fc_layers(
             fc_cfg=self.model_cfg.CLS_FC,
             input_channels=input_channels,
-            output_channels=num_class
+            output_channels=num_class+1
         )
 
     def assign_targets(self, input_dict):
@@ -145,6 +145,32 @@ class PointSegHead(PointHeadTemplate):
             'cls_loss_func',
             SoftmaxFocalClassificationLoss(alpha=0.25, gamma=2.0)
         )
+
+    def get_cls_layer_loss(self, tb_dict=None):
+        point_cls_labels = self.forward_ret_dict['point_cls_labels'].view(-1)
+        point_cls_preds = self.forward_ret_dict['point_cls_preds'].view(-1, self.num_class+1)
+
+        positives = (point_cls_labels > 0)
+        negative_cls_weights = (point_cls_labels == 0) * 1.0
+        cls_weights = (negative_cls_weights + 1.0 * positives).float()
+        pos_normalizer = positives.sum(dim=0).float()
+        cls_weights /= torch.clamp(pos_normalizer, min=1.0)
+
+        one_hot_targets = point_cls_preds.new_zeros(*list(point_cls_labels.shape), self.num_class + 2)
+        one_hot_targets.scatter_(-1, (point_cls_labels * (point_cls_labels >= 0).long()).unsqueeze(dim=-1).long(), 1.0)
+        one_hot_targets = one_hot_targets[..., 1:]
+        cls_loss_src = self.cls_loss_func(point_cls_preds, one_hot_targets, weights=cls_weights)
+        point_loss_cls = cls_loss_src.sum()
+
+        loss_weights_dict = self.model_cfg.LOSS_CONFIG.LOSS_WEIGHTS
+        point_loss_cls = point_loss_cls * loss_weights_dict['point_cls_weight']
+        if tb_dict is None:
+            tb_dict = {}
+        tb_dict.update({
+            'point_loss_cls': point_loss_cls.item(),
+            'point_pos_num': pos_normalizer.item()
+        })
+        return point_loss_cls, tb_dict
 
     # def assign_point_targets(self, points, gt_boxes, extend_gt_boxes=None,
     #                          ret_box_labels=False, ret_part_labels=False,
