@@ -36,7 +36,7 @@ MODEL:
 
     POINT_HEAD:
       NAME: PointSegHead
-      CLS_FC: [ 256, 4 ]
+      CLS_FC: [ 256, 256 ]
       CLASS_AGNOSTIC: False
       USE_POINT_FEATURES_BEFORE_FUSION: False
       TARGET_CONFIG:
