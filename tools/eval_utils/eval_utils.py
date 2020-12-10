@@ -189,7 +189,7 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     with open(result_dir / 'result.pkl', 'wb') as f:
         pickle.dump(det_annos, f)
 
-    result_str, result_dict = point_seg_evaluation(dataset, det_annos, class_names, output_path=final_output_dir)
+    result_str, result_dict = point_seg_evaluation(det_annos, class_names, output_path=final_output_dir)
 
     logger.info(result_str)
     #ret_dict.update(result_dict)
@@ -199,7 +199,7 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     return result_dict
 
 
-def point_seg_evaluation(dataset, det_dicts, classnames, output_path):
+def point_seg_evaluation(det_dicts, classnames, output_path):
     result_str = ''
     result_dict = {}
     total_correct = 0
@@ -208,9 +208,8 @@ def point_seg_evaluation(dataset, det_dicts, classnames, output_path):
     total_seen_class = [0 for _ in classnames]
     total_iou_class = [0 for _ in classnames]
     for det in det_dicts:
-        #point_cls_labels = generate_point_label(det['frame_id'], det['point_coords'], det['gt_boxes'])
         point_cls_labels = np.zeros((len(det['point_coords'])))
-        for i,box in enumerate(det['gt_boxes']):
+        for box in enumerate(det['gt_boxes']):
             box_dim = box[np.newaxis, :]
             box_dim = box_dim[:, 0:7]
             corners = box_utils.boxes_to_corners_3d(box_dim)
@@ -223,21 +222,24 @@ def point_seg_evaluation(dataset, det_dicts, classnames, output_path):
             total_seen_class[i] += np.sum((point_cls_labels == i+1))
             total_correct_class[i] += np.sum((det['point_cls_scores'] == i+1) & (point_cls_labels == i+1))
             total_iou_class += np.sum((det['point_cls_scores'] == i+1) | (point_cls_labels == i+1))
-    mIoU = np.mean(np.array(total_correct_class)/(np.array(total_iou_class, dtype=np.float) + 1e-6))
+
     total_correct /= total_seen
-    #total_correct_class /= np.mean(np.array(total_correct_class)/(np.array(total_seen_class, dtype=np.float) + 1e-6))
-    result_str += print_str((f"point avg class IoU: {mIoU:.4f}"))
-    result_str += print_str((f"point accuracy: {total_correct:.4f}"))
-    #result_str += print_str((f"point avg class acc: {total_correct_class:.4f}"))
-    result_str += print_str(f"car acc: {total_correct_class[0]/total_seen_class[0]:.4f}")
+    # mIoU = np.mean(np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6))
+    mIoU = np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6)
+    #result_str += print_str((f"point avg IoU: {mIoU:.4f}"))
+    result_str += print_str((f"Avg point segmentation accuracy: {total_correct:.4f}"))
+    result_str += print_str(f"Car acc: {total_correct_class[0]/total_seen_class[0]:.4f}")
     result_str += print_str(f"Pedestrian acc: {total_correct_class[1] / total_seen_class[1]:.4f}")
     result_str += print_str(f"Cyclist acc: {total_correct_class[2] / total_seen_class[2]:.4f}")
+    result_str += print_str(f"Car IoU: {mIoU[0]:.4f}")
+    result_str += print_str(f"Pedestrian IoU: {mIoU[1]:.4f}")
+    result_str += print_str(f"Cyclist IoU: {mIoU[2]:.4f}")
 
-    result_dict['mIoU'] = mIoU
     result_dict['avg_acc'] = total_correct
     result_dict['avg_car_acc'] = total_correct_class[0]/total_seen_class[0]
     result_dict['avg_ped_acc'] = total_correct_class[1] / total_seen_class[1]
     result_dict['avg_cyc_acc'] = total_correct_class[2] / total_seen_class[2]
+    # result_dict['mIoU'] = mIoU
     return result_str, result_dict
 
 
