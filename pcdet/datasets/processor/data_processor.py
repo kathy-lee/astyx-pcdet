@@ -88,7 +88,7 @@ class DataProcessor(object):
             pts_near_flag = pts_depth < 40.0
             far_idxs_choice = np.where(pts_near_flag == 0)[0]
             near_idxs = np.where(pts_near_flag == 1)[0]
-            near_idxs_choice = np.random.choice(near_idxs, num_points - len(far_idxs_choice), replace=False)
+            # near_idxs_choice = np.random.choice(near_idxs, num_points - len(far_idxs_choice), replace=False)
             choice = []
             if num_points > len(far_idxs_choice):
                 near_idxs_choice = np.random.choice(near_idxs, num_points - len(far_idxs_choice), replace=False)
@@ -101,7 +101,10 @@ class DataProcessor(object):
         else:
             choice = np.arange(0, len(points), dtype=np.int32)
             if num_points > len(points):
-                extra_choice = np.random.choice(choice, num_points - len(points), replace=False)
+                if num_points >= len(points)*2:
+                    extra_choice = np.random.choice(choice, num_points - len(points), replace=True)
+                else:
+                    extra_choice = np.random.choice(choice, num_points - len(points), replace=False)
                 choice = np.concatenate((choice, extra_choice), axis=0)
             np.random.shuffle(choice)
         data_dict['points'] = points[choice]
