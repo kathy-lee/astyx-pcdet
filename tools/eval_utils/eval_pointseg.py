@@ -44,6 +44,7 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
             #         print(key, type(value), value.shape)
             #     else:
             #         print(key, value)
+            print(batch_dict['frame_id'])
         annos = []
         pts_num = int(len(pred_dict['points'])/pred_dict['batch_size'])
         points = pred_dict['point_coords'].cpu().numpy()
@@ -91,6 +92,8 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
     total_seen_class = [0 for _ in classnames]
     total_iou_class = [0 for _ in classnames]
     for det in det_dicts:
+        # print('****************************eval detection point scores ')
+        # print(det['point_cls_scores'][:100])############
         point_cls_labels = np.zeros((len(det['point_coords'])))
         for box in det['gt_boxes']:
             box_dim = box[np.newaxis, :]
@@ -99,6 +102,8 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
             corners = np.squeeze(corners, axis=0)
             flag = box_utils.in_hull(det['point_coords'][:, 1:], corners)
             point_cls_labels[flag] = int(box[-1])
+        # print(point_cls_labels[:100])###############
+        # print(det['point_cls_scores'].shape, point_cls_labels.shape)#################
         total_correct += np.sum(det['point_cls_scores'] == point_cls_labels)
         total_seen += det['point_cls_scores'].size
         for i in range(len(classnames)):
