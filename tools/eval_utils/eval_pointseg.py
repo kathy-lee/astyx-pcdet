@@ -83,6 +83,21 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     return result_dict
 
 
+def compute_confusion_matrix(label, pred):
+  '''Computes a confusion matrix
+   Args:
+         label: true labels(numpy array: [N])
+         pred: predicted labels(numpy array: [N])
+  return:
+         conf: confusion matrix(numpy array: [N*N])
+  '''
+  N = len(np.unique(label)) # Number of classes
+  conf = np.zeros((N, N))
+  for i in range(len(label)):
+    conf[label[i]][pred[i]] += 1
+  return conf
+
+
 def point_seg_evaluation(det_dicts, classnames, output_path):
     result_str = ''
     result_dict = {}
@@ -92,7 +107,7 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
     total_seen_class = [0 for _ in classnames]
     total_iou_class = [0 for _ in classnames]
     for det in det_dicts:
-        # print('****************************eval detection point scores ')
+        # print('****************************Eval detection point scores************************ ')
         # print(det['point_cls_scores'][:100])############
         point_cls_labels = np.zeros((len(det['point_coords'])))
         for box in det['gt_boxes']:
