@@ -83,7 +83,7 @@ def eval_one_epoch_seg(cfg, model, dataloader, epoch_id, logger, dist_test=False
     return result_dict
 
 
-def compute_confusion_matrix(label, pred):
+def compute_confusion_matrix(label, pred, normalize=False):
   '''Computes a confusion matrix
    Args:
          label: true labels(numpy array: [N])
@@ -91,10 +91,12 @@ def compute_confusion_matrix(label, pred):
   return:
          conf: confusion matrix(numpy array: [N*N])
   '''
-  N = len(np.unique(label)) # Number of classes
+  N = len(np.unique(label))
   conf = np.zeros((N, N))
   for i in range(len(label)):
-    conf[label[i]][pred[i]] += 1
+      conf[label[i]][pred[i]] += 1
+  if normalize:
+      conf = conf / conf.sum(axis=1, keepdims=True)
   return conf
 
 
@@ -146,6 +148,8 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
     result_dict['avg_car_iou'] = mIoU[0]
     result_dict['avg_ped_iou'] = mIoU[1]
     result_dict['avg_cyc_iou'] = mIoU[2]
+
+
     return result_str, result_dict
 
 
