@@ -108,6 +108,8 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
     total_correct_class = [0 for _ in classnames]
     total_seen_class = [0 for _ in classnames]
     total_iou_class = [0 for _ in classnames]
+    labels = []
+    preds = []
     for det in det_dicts:
         # print('****************************Eval detection point scores************************ ')
         # print(det['point_cls_scores'][:100])############
@@ -123,32 +125,51 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
         # print(det['point_cls_scores'].shape, point_cls_labels.shape)#################
         total_correct += np.sum(det['point_cls_scores'] == point_cls_labels)
         total_seen += det['point_cls_scores'].size
+        labels += point_cls_labels.tolist()
+        preds += det['point_cls_scores'].tolist()
         for i in range(len(classnames)):
             total_seen_class[i] += np.sum((point_cls_labels == i+1))
             total_correct_class[i] += np.sum((det['point_cls_scores'] == i+1) & (point_cls_labels == i+1))
             total_iou_class += np.sum((det['point_cls_scores'] == i+1) | (point_cls_labels == i+1))
 
     total_correct /= total_seen
+    acc = total_correct_class/total_seen_class
     # mIoU = np.mean(np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6))
     mIoU = np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6)
     #result_str += print_str((f"point avg IoU: {mIoU:.4f}"))
     result_str += print_str((f"Avg point segmentation accuracy: {total_correct:.4f}"))
-    result_str += print_str(f"Car acc: {total_correct_class[0]/total_seen_class[0]:.4f}")
-    result_str += print_str(f"Pedestrian acc: {total_correct_class[1] / total_seen_class[1]:.4f}")
-    result_str += print_str(f"Cyclist acc: {total_correct_class[2] / total_seen_class[2]:.4f}")
+    result_str += print_str(f"Car acc: {acc[0]:.4f}")
+    result_str += print_str(f"Pedestrian acc: {acc[1]:.4f}")
+    result_str += print_str(f"Cyclist acc: {acc[2]:.4f}")
     result_str += print_str(f"Car IoU: {mIoU[0]:.4f}")
     result_str += print_str(f"Pedestrian IoU: {mIoU[1]:.4f}")
     result_str += print_str(f"Cyclist IoU: {mIoU[2]:.4f}")
 
+    confusion_matrix = compute_confusion_matrix(labels, preds)
+    recall = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=1)
+    precision = np.diag(confusion_matrix) / np.sum(confusion_matrix, axis=0)
+    result_str += print_str(f"Car precision score: {precision[0]:.4f}")
+    result_str += print_str(f"Pedestrian precision score: {precision[1]:.4f}")
+    result_str += print_str(f"Cyclist precision score: {precision[2]:.4f}")
+    result_str += print_str(f"Car recall score: {recall[0]:.4f}")
+    result_str += print_str(f"Pedestrian recall score: {recall[1]:.4f}")
+    result_str += print_str(f"Cyclist recall score: {recall[2]:.4f}")
+
+
     result_dict['avg_acc'] = total_correct
-    result_dict['avg_car_acc'] = total_correct_class[0]/total_seen_class[0]
-    result_dict['avg_ped_acc'] = total_correct_class[1] / total_seen_class[1]
-    result_dict['avg_cyc_acc'] = total_correct_class[2] / total_seen_class[2]
+    result_dict['avg_car_acc'] = acc[0]
+    result_dict['avg_ped_acc'] = acc[1]
+    result_dict['avg_cyc_acc'] = acc[2]
     # result_dict['mIoU'] = mIoU
     result_dict['avg_car_iou'] = mIoU[0]
     result_dict['avg_ped_iou'] = mIoU[1]
     result_dict['avg_cyc_iou'] = mIoU[2]
-
+    result_dict['avg_car_precision'] = precision[0]
+    result_dict['avg_ped_precision'] = precision[1]
+    result_dict['avg_cyc_precision'] = precision[2]
+    result_dict['avg_car_recall'] = recall[0]
+    result_dict['avg_ped_recall'] = recall[1]
+    result_dict['avg_cyc_recall'] = recall[2]
 
     return result_str, result_dict
 
