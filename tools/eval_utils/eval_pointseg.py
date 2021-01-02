@@ -120,20 +120,20 @@ def point_seg_evaluation(det_dicts, classnames, output_path):
             corners = box_utils.boxes_to_corners_3d(box_dim)
             corners = np.squeeze(corners, axis=0)
             flag = box_utils.in_hull(det['point_coords'][:, 1:], corners)
-            point_cls_labels[flag] = int(box[-1])
+            point_cls_labels[flag] = box[-1]
         # print(point_cls_labels[:100])###############
         # print(det['point_cls_scores'].shape, point_cls_labels.shape)#################
         total_correct += np.sum(det['point_cls_scores'] == point_cls_labels)
         total_seen += det['point_cls_scores'].size
-        labels += point_cls_labels.tolist()
-        preds += det['point_cls_scores'].tolist()
         for i in range(len(classnames)):
             total_seen_class[i] += np.sum((point_cls_labels == i+1))
             total_correct_class[i] += np.sum((det['point_cls_scores'] == i+1) & (point_cls_labels == i+1))
             total_iou_class += np.sum((det['point_cls_scores'] == i+1) | (point_cls_labels == i+1))
+        labels += [round(x) for x in point_cls_labels]
+        preds += det['point_cls_scores'].tolist()
 
     total_correct /= total_seen
-    acc = total_correct_class/total_seen_class
+    acc = np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float) + 1e-6)
     # mIoU = np.mean(np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6))
     mIoU = np.array(total_correct_class) / (np.array(total_iou_class, dtype=np.float) + 1e-6)
     #result_str += print_str((f"point avg IoU: {mIoU:.4f}"))
