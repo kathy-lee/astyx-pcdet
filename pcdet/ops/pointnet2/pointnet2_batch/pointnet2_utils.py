@@ -164,8 +164,12 @@ class GroupingOperation(Function):
         :return:
             output: (B, C, npoint, nsample) tensor
         """
-        assert features.is_contiguous()
-        assert idx.is_contiguous()
+        # assert features.is_contiguous()
+        # assert idx.is_contiguous()
+        if not features.is_contiguous():
+            features = features.contiguous()
+        if not idx.is_contiguous():
+            idx = idx.contiguous()
 
         B, nfeatures, nsample = idx.size()
         _, C, N = features.size()

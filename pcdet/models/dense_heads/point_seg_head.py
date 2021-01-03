@@ -34,19 +34,12 @@ class SoftmaxFocalClassificationLoss(nn.Module):
         Returns:
             weighted_loss: (B, #anchors, #classes) float tensor after weighting.
         """
-        # softmax = nn.Softmax(dim=1)
-        # pred = softmax(input)
-        # alpha_weight = target * self.alpha + (1 - target) * (1 - self.alpha)
-        # pt = target * (1.0 - pred) + (1.0 - target) * pred
-        # focal_weight = alpha_weight * torch.pow(pt, self.gamma)
-        # loss = nn.CrossEntropyLoss()
-        # labels = torch.argmax(target, dim=1)
-        # ce_loss = loss(input, labels)
-        # loss = focal_weight * ce_loss
-
         ce_loss = nn.functional.cross_entropy(input, target, reduction='none')#target.to(torch.int64)
         pt = torch.exp(-ce_loss)
-        loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        #loss = self.alpha * (1-pt)**self.gamma * ce_loss
+        loss = ce_loss
+        print('loss shape:')
+        print(loss.shape, weights.shape)
 
         if weights.shape.__len__() == 2 or \
                 (weights.shape.__len__() == 1 and target.shape.__len__() == 2):
@@ -54,7 +47,7 @@ class SoftmaxFocalClassificationLoss(nn.Module):
 
         assert weights.shape.__len__() == loss.shape.__len__()
 
-        # loss *= weights
+        loss *= weights
         loss = loss.mean()
 
         return loss
@@ -101,14 +94,6 @@ class PointSegHead(PointHeadTemplate):
 
         return targets_dict
 
-    def get_loss(self, tb_dict=None):
-        tb_dict = {} if tb_dict is None else tb_dict
-        point_loss_cls, tb_dict_1 = self.get_cls_layer_loss()
-
-        point_loss = point_loss_cls
-        tb_dict.update(tb_dict_1)
-        return point_loss, tb_dict
-
     def forward(self, batch_dict):
         """
         Args:
@@ -136,8 +121,14 @@ class PointSegHead(PointHeadTemplate):
         softmax = nn.Softmax(dim=1)
         point_cls_scores = softmax(point_cls_preds)
         _, batch_dict['point_cls_scores'] = torch.max(point_cls_scores, 1)
+        # print('detected scores:')
+        # print(batch_dict['point_cls_scores'][:200])
+
 
         if self.training:
+            targets_dict = self.assign_targets(batch_dict)
+            ret_dict['point_cls_labels'] = targets_dict['point_cls_labels']
+        else:##############################else branch only for showing debugging info
             targets_dict = self.assign_targets(batch_dict)
             ret_dict['point_cls_labels'] = targets_dict['point_cls_labels']
         self.forward_ret_dict = ret_dict
@@ -150,15 +141,36 @@ class PointSegHead(PointHeadTemplate):
             SoftmaxFocalClassificationLoss(alpha=0.25, gamma=2.0)
         )
 
+    def get_loss(self, tb_dict=None):
+        tb_dict = {} if tb_dict is None else tb_dict
+        point_loss_cls, tb_dict_1 = self.get_cls_layer_loss()
+
+        point_loss = point_loss_cls
+        tb_dict.update(tb_dict_1)
+        return point_loss, tb_dict
+
     def get_cls_layer_loss(self, tb_dict=None):
         point_cls_labels = self.forward_ret_dict['point_cls_labels'].view(-1)
         point_cls_preds = self.forward_ret_dict['point_cls_preds'].view(-1, self.num_class+1)
 
         positives = (point_cls_labels > 0)
         negative_cls_weights = (point_cls_labels == 0) * 1.0
-        cls_weights = (negative_cls_weights + 1.0 * positives).float()
+        cls_weights = (negative_cls_weights + 10.0 * positives).float()
         pos_normalizer = positives.sum(dim=0).float()
         cls_weights /= torch.clamp(pos_normalizer, min=1.0)
+        ####################################### Weights Info
+        print('Weights Info')
+        print(cls_weights.shape)
+        #print(point_cls_labels[:200])
+        #print(point_cls_preds[:200])
+        label = point_cls_labels.cpu().numpy()
+        u,count = np.unique(label, return_counts=True)
+        print(u)
+        print(count)
+        #print(cls_weights[:200])
+        weight = cls_weights.tolist()
+        print(len(set(weight)))
+        ########################################
 
         # one_hot_targets = point_cls_preds.new_zeros(*list(point_cls_labels.shape), self.num_class + 2)
         # one_hot_targets.scatter_(-1, (point_cls_labels * (point_cls_labels >= 0).long()).unsqueeze(dim=-1).long(), 1.0)

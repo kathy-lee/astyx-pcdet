@@ -12,12 +12,14 @@ class PointNetSeg(Detector3DTemplate):
 
         if self.training:
             loss, tb_dict, disp_dict = self.get_training_loss()
-
+            print(f'LOSS: %f' % loss)  #################
             ret_dict = {
                 'loss': loss
             }
             return ret_dict, tb_dict, disp_dict
         else:
+            loss, tb_dict, disp_dict = self.get_training_loss()########################only for debugging info
+            print(f'LOSS: %f' % loss)  #################
             return batch_dict
 
     def get_training_loss(self):
