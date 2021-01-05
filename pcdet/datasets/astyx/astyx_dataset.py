@@ -86,7 +86,10 @@ class AstyxDataset(DatasetTemplate):
         elif pc_type == 'radar':
             radar_file = self.root_split_path / 'radar_6455' / ('%s.txt' % idx)
             assert radar_file.exists()
-            return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 4))
+            #return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3, 4))
+            pc = np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3, 4))
+            pc[:, -1] -= 45
+            return pc
         else:
             pass
 
@@ -438,7 +441,6 @@ class AstyxDataset(DatasetTemplate):
             'frame_id': sample_idx,
             'calib': calib,
         }
-
         if 'annos' in info:
             annos = info['annos']
             # ##################################################################
@@ -462,9 +464,15 @@ class AstyxDataset(DatasetTemplate):
             if road_plane is not None:
                 input_dict['road_plane'] = road_plane
 
+        # print('%%%%%%%%%%%%%%%%%%%%%%%% Before prepare_data ')
+        # print(input_dict['points'].shape)
+        # print(input_dict['points'][:10, :])
         data_dict = self.prepare_data(data_dict=input_dict)
 
         data_dict['image_shape'] = img_shape
+        # print('%%%%%%%%%%%%%%%%%%%%%%%% After prepare_data ')
+        # print(data_dict['points'].shape)
+        # print(data_dict['points'][:10, :])
         return data_dict
 
 
@@ -478,6 +486,7 @@ def create_astyx_infos(dataset_cfg, class_names, data_path, save_path, workers=4
     test_filename = save_path / 'astyx_infos_test.pkl'
 
     print('---------------Start to generate data infos---------------')
+    print(f'point cloud type: %s' % dataset.pc_type)
 
     dataset.set_split(train_split)
     astyx_infos_train = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)
