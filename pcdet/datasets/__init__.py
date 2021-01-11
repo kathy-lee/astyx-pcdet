@@ -70,3 +70,62 @@ def build_dataloader(dataset_cfg, class_names, batch_size, dist, root_path=None,
     )
 
     return dataset, dataloader, sampler
+
+
+def build_proposals_dataloader(dataset_cfg, class_names, batch_size, dist, root_path=None, workers=4,
+                     logger=None, training=True, merge_all_iters_to_one_epoch=False, total_epochs=0):
+
+    dataset = __all__[dataset_cfg.DATASET](
+        dataset_cfg=dataset_cfg,
+        class_names=class_names,
+        root_path=root_path,
+        training=training,
+        logger=logger,
+    )
+    dataset = generate_proposals(dataset)
+    if merge_all_iters_to_one_epoch:
+        assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
+        dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)
+
+    if dist:
+        if training:
+            sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        else:
+            rank, world_size = common_utils.get_dist_info()
+            sampler = DistributedSampler(dataset, world_size, rank, shuffle=False)
+    else:
+        sampler = None
+    dataloader = DataLoader(
+        dataset, batch_size=batch_size, pin_memory=True, num_workers=workers,
+        shuffle=(sampler is None) and training, collate_fn=dataset.collate_batch,
+        drop_last=False, sampler=sampler, timeout=0
+    )
+
+    return dataset, dataloader, sampler
+
+def generate_proposals(model_cfg, dataset):
+    dx, dy, dz = model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
+    props_list = []
+    for data in dataset:
+        for pt in data['points']:
+            proposals = []
+            xc, yc, zc = pt
+            proposals.append([xc, yc, zc, dx, dy, dz])
+            proposals.append([xc + dx / 4, yc, zc, dx, dy, dz])
+            proposals.append([xc - dx / 4, yc, zc, dx, dy, dz])
+            proposals.append([xc, yc + dy / 4, zc, dx, dy, dz])
+            proposals.append([xc, yc - dy / 4, zc, dx, dy, dz])
+            proposals.append([xc + dx / 4, yc + dy / 4, zc, dx, dy, dz])
+            proposals.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
+            proposals.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
+            proposals.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
+        for prop in proposals:
+            pts = get_points(data['points'], prop)
+            label = assign_target(data['gt_boxes'], prop)
+            prop_dict = {'pos': pos,
+                         'pts': pts,
+                         'label': label}
+            props_list.append(prop_dict)
+        data['proposal'] = props_list
+
+    return props_list
