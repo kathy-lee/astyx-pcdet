@@ -104,9 +104,11 @@ def build_proposals_dataloader(dataset_cfg, class_names, batch_size, dist, root_
     return dataset, dataloader, sampler
 
 def generate_proposals(model_cfg, dataset):
+    import numpy as np
+
     dx, dy, dz = model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
     props_list = []
-    for data in dataset:
+    for index, data in enumerate(dataset):
         for pt in data['points']:
             proposals = []
             xc, yc, zc = pt
@@ -119,13 +121,17 @@ def generate_proposals(model_cfg, dataset):
             proposals.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
             proposals.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
             proposals.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
-        for prop in proposals:
-            pts = get_points(data['points'], prop)
-            label = assign_target(data['gt_boxes'], prop)
-            prop_dict = {'pos': pos,
-                         'pts': pts,
-                         'label': label}
-            props_list.append(prop_dict)
-        data['proposal'] = props_list
+            proposals_horizon = [[*pr, 0] for pr in proposals]
+            proposals_vertica = [[*pr, np.pi/2] for pr in proposals]
+            proposals = proposals_horizon + proposals_vertica
+        # for prop in proposals:
+        #     pts = get_points(data['points'], prop)
+        #     label = assign_target(data['gt_boxes'], prop)
+        #     prop_dict = {'pos': pos,
+        #                  'pts': pts,
+        #                  'label': label}
+        #     props_list.append(prop_dict)
+        # data['proposal'] = props_list
+        dataset[index].update({'rois': proposals})
 
-    return props_list
+    return dataset
