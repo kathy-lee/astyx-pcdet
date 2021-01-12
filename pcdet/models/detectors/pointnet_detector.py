@@ -2,25 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from pcdet.utils.box_utils import in_hull, boxes_to_corners_3d
 
 NUM_HEADING_BIN = 12
 NUM_SIZE_CLUSTER = 8 # one cluster for each type
-NUM_OBJECT_POINT = 512
-g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
-              'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7}
-g_class2type = {g_type2class[t]:t for t in g_type2class}
-g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
-g_type_mean_size = {'Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
-                    'Van': np.array([5.06763659,1.9007158,2.20532825]),
-                    'Truck': np.array([10.13586957,2.58549199,3.2520595]),
-                    'Pedestrian': np.array([0.84422524,0.66068622,1.76255119]),
-                    'Person_sitting': np.array([0.80057803,0.5983815,1.27450867]),
-                    'Cyclist': np.array([1.76282397,0.59706367,1.73698127]),
-                    'Tram': np.array([16.17150617,2.53246914,3.53079012]),
-                    'Misc': np.array([3.64300781,1.54298177,1.92320313])}
-g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3)) # size clustrs
-for i in range(NUM_SIZE_CLUSTER):
-    g_mean_size_arr[i,:] = g_type_mean_size[g_class2type[i]]
+
 
 def make_fc_layers(fc_cfg, input_channels, output_channels):
     fc_layers = []
@@ -34,6 +20,7 @@ def make_fc_layers(fc_cfg, input_channels, output_channels):
         c_in = fc_cfg[k]
     fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
     return nn.Sequential(*fc_layers)
+
 
 class PointNetv1(nn.Module):
     def __init__(self, num_class=3, input_channels=4):
@@ -52,11 +39,11 @@ class PointNetv1(nn.Module):
         self.bn5 = nn.BatchNorm1d(1024)
         self.cls_layers = self.make_fc_layers(input_channels=input_channels, output_channels=num_class + 1)
 
-    def forward(self, data_dict):  # bs,4,n
-        bs = data_dict['pts'].size()[0]
-        n_pts = data_dict['pts'].size()[2]
+    def forward(self, batch_data):  # bs,4,n
+        bs = batch_data.size()[0]
+        n_pts = batch_data.size()[2]
 
-        out1 = F.relu(self.bn1(self.conv1(data_dict['pts'])))  # bs,64,n
+        out1 = F.relu(self.bn1(self.conv1(batch_data)))  # bs,64,n
         out2 = F.relu(self.bn2(self.conv2(out1)))  # bs,64,n
         out3 = F.relu(self.bn3(self.conv3(out2)))  # bs,64,n
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,128,n
@@ -70,13 +57,13 @@ class PointNetv1(nn.Module):
         one_hot_vec = torch.zeros(self.num_class)
         one_hot_vec[cls_pred] = 1
 
-        data_dict.update({
+        feature_dict = {
             'local_feat': out2,
             'global_feat': global_feat,
             'cls_pred': one_hot_vec,
             'cls_score': cls_score
-        })
-        return data_dict
+        }
+        return feature_dict
 
 
 class PointSeg(nn.Module):
@@ -112,8 +99,8 @@ class PointSeg(nn.Module):
         x = self.dropout(x)
         x = self.dconv5(x)  # bs, 2, n
 
-        data_dict['seg_pred'] = x.transpose(2, 1).contiguous()  # bs, n, 2
-        return data_dict
+        seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
+        return seg_pred
 
 
 class CenterRegNet(nn.Module):
@@ -202,53 +189,75 @@ class BoxRegNet(nn.Module):
 
 
 class PointNetDetector(nn.Module):
-    def __init__(self, n_classes=3, n_channel=4):
+    def __init__(self, model_cfg, dataset, n_classes=3, n_channel=4):
         super(PointNetDetector, self).__init__()
+        self.model_cfg = model_cfg
         self.n_classes = n_classes
+        self.dataset = dataset
         self.PointCls = PointNetv1(n_classes=3, n_channel=n_channel)
         self.PointSeg = PointSeg(n_classes=3, n_channel=n_channel)
         self.CenterReg = CenterRegNet(n_classes=3)
         self.BoxReg = BoxRegNet(n_classes=3)
         self.NUM_OBJECT_POINT = 512
 
-    def forward(self, data_dict):  # bs,4,n
-        for index, data in enumerate(data_dict['proposal']):
-           output = self.PointNetv1(data)
-           data_dict['proposal'][index].update(output)
+    def forward(self, batch_dict):  # bs,4,n
 
-        self.pop_proposals(data_dict['proposal'])
+        proposals = self.generate_proposals(batch_dict)
 
-        for index, data in enumerate(data_dict['proposal']):
-            # 3D Instance Segmentation PointNet
-            logits = self.PointSeg(data)  # bs,n,2
+        batch_target = self.generate_targets(batch_dict, proposals)
 
-            # Mask Point Centroid
-            object_pts_xyz, mask_xyz_mean, mask = self.point_cloud_masking(data['pts'], logits)  ###logits.detach()
+        feature_dict = self.PointNetv1(proposals['pts'])
 
-            # T-Net
-            object_pts_xyz = object_pts_xyz.cuda()
-            center_delta = self.CenterReg(object_pts_xyz)  # (32,3)
-            stage1_center = center_delta + mask_xyz_mean  # (32,3)
+        #ret_dict = {'target_cls_preds': feature_dict['cls_pred']}
+        if self.training:
+            targets_dict = self.assign_targets(batch_dict)
+            #ret_dict['target_cls_labels'] = targets_dict['target_cls_labels']
+            cls_loss = F.cross_entropy(feature_dict['cls_score'], targets_dict['target_cls_labels'])
 
-            # if (np.isnan(stage1_center.cpu().detach().numpy()).any()):
-            #     ipdb.set_trace()
-            object_pts_xyz_new = object_pts_xyz - \
-                                 center_delta.view(center_delta.shape[0], -1, 1).repeat(1, 1, object_pts_xyz.shape[-1])
+        proposals = self.pop_proposals(proposals, feature_dict)
 
-            # 3D Box Estimation
-            box_pred = self.BoxReg(object_pts_xyz_new)  # (32, 59)
+        # 3D Instance Segmentation PointNet
+        logits = self.PointSeg(proposals['pts'], feature_dict)  # bs,n,2
 
-            center_boxnet, \
-            heading_scores, heading_residuals_normalized, heading_residuals, \
-            size_scores, size_residuals_normalized, size_residuals = \
-                self.parse_output_to_tensors(box_pred, logits, mask, stage1_center)
+        # Mask Point Centroid
+        object_pts_xyz, mask_xyz_mean, mask = self.point_cloud_masking(proposals['pts'], logits)  ###logits.detach()
 
-            center = center_boxnet + stage1_center  # bs,3
-        return logits, mask, stage1_center, center_boxnet, \
-               heading_scores, heading_residuals_normalized, heading_residuals, \
-               size_scores, size_residuals_normalized, size_residuals, center
+        # T-Net
+        object_pts_xyz = object_pts_xyz.cuda()
+        center_delta = self.CenterReg(object_pts_xyz)  # (32,3)
+        stage1_center = center_delta + mask_xyz_mean  # (32,3)
 
-    def get_loss(self, logits, mask_label, \
+        # if (np.isnan(stage1_center.cpu().detach().numpy()).any()):
+        #     ipdb.set_trace()
+        object_pts_xyz_new = object_pts_xyz - \
+                             center_delta.view(center_delta.shape[0], -1, 1).repeat(1, 1, object_pts_xyz.shape[-1])
+
+        # 3D Box Estimation
+        box_pred = self.BoxReg(object_pts_xyz_new)  # (32, 59)
+
+        center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
+        size_scores, size_residuals_normalized, size_residuals = \
+            self.parse_output_to_tensors(box_pred, logits, mask, stage1_center)
+
+        center = center_boxnet + stage1_center  # bs,3
+
+        if self.training:
+            loss, tb_dict, disp_dict = self.get_loss(feature_dict, logits, batch_target['label'], center,
+                                                     batch_target['center'], stage1_center, heading_scores,
+                                                     heading_residuals_normalized, heading_residuals,
+                                                     batch_target['hclass'], batch_target['hres'], size_scores,
+                                                     size_residuals_normalized, size_residuals, batch_target['sclass'],
+                                                     batch_target['sres'])
+
+            ret_dict = {
+                'loss': loss
+            }
+            return ret_dict, tb_dict, disp_dict
+        else:
+            pred_dicts, recall_dicts = self.post_processing(batch_dict)
+            return pred_dicts, recall_dicts
+
+    def get_loss(self, feature_dict, logits, mask_label, \
                  center, center_label, stage1_center, \
                  heading_scores, heading_residual_normalized, heading_residual, \
                  heading_class_label, heading_residual_label, \
@@ -280,7 +289,26 @@ class PointNetDetector(nn.Module):
         corner_loss_weight: float scalar
         box_loss_weight: float scalar
         '''
+        g_type2class = {'Car': 0, 'Van': 1, 'Truck': 2, 'Pedestrian': 3,
+                        'Person_sitting': 4, 'Cyclist': 5, 'Tram': 6, 'Misc': 7}
+        g_class2type = {g_type2class[t]: t for t in g_type2class}
+        g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
+        g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
+                            'Van': np.array([5.06763659, 1.9007158, 2.20532825]),
+                            'Truck': np.array([10.13586957, 2.58549199, 3.2520595]),
+                            'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
+                            'Person_sitting': np.array([0.80057803, 0.5983815, 1.27450867]),
+                            'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127]),
+                            'Tram': np.array([16.17150617, 2.53246914, 3.53079012]),
+                            'Misc': np.array([3.64300781, 1.54298177, 1.92320313])}
+        g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3))  # size clustrs
+        for i in range(NUM_SIZE_CLUSTER):
+            g_mean_size_arr[i, :] = g_type_mean_size[g_class2type[i]]
+
         bs = logits.shape[0]
+        # 3D Proposal Classification Loss
+        cls_loss = F.cross_entropy(feature_dict['cls_score'], cls_target)
+
         # 3D Instance Segmentation PointNet Loss
         logits = F.log_softmax(logits.view(-1, 2), dim=1)  # torch.Size([32768, 2])
         mask_label = mask_label.view(-1).long()  # torch.Size([32768])
@@ -370,6 +398,45 @@ class PointNetDetector(nn.Module):
         }
         return losses
 
+    def generate_proposals(self, batch_dict):
+        dx, dy, dz = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
+        batch_proposal_poses = []
+        batch_proposal_points = []
+        batch_frame_ids = []
+        for index, data in enumerate(batch_dict):
+            poses = []
+            for pt in data['points']:
+                pos = []
+                xc, yc, zc = pt
+                pos.append([xc, yc, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc, zc, dx, dy, dz])
+                pos.append([xc, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc, yc - dy / 4, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
+                pos_horizon = [[*pr, 0] for pr in pos]
+                pos_vertica = [[*pr, np.pi / 2] for pr in pos]
+                poses.append(pos_horizon + pos_vertica)
+            frame_ids = []
+            indices = []
+            corners3d = boxes_to_corners_3d(poses)
+            for k in range(len(poses)):
+                flag = in_hull(data['points'][:, 0:3], corners3d[k])
+                indice = [i for i, x in enumerate(flag) if x == 1]
+                indices.extend(indice)
+                frame_ids.append(data['frame_id'])
+            points = data['points'][indices]
+
+            batch_proposal_poses.append(*poses)
+            batch_proposal_points.append(*points)
+            batch_frame_ids.append(*frame_ids)
+
+        proposals = {'frame_id': batch_frame_ids, 'pos': batch_proposal_poses, 'pts': batch_proposal_points}
+        return proposals
+
     def point_cloud_masking(self, pts, logits, xyz_only=True):
         '''
         :param pts: bs,c,n in frustum
@@ -400,7 +467,7 @@ class PointNetDetector(nn.Module):
         object_pts = object_pts.float().view(bs,3,-1)
         return object_pts, mask_xyz_mean.squeeze(), mask
 
-    def gather_object_pts(self, pts, mask, n_pts=NUM_OBJECT_POINT):
+    def gather_object_pts(self, pts, mask, n_pts):
         '''
         :param pts: (bs,c,1024)
         :param mask: (bs,1024)
@@ -538,9 +605,20 @@ class PointNetDetector(nn.Module):
         losses = 0.5 * quadratic ** 2 + delta * linear
         return torch.mean(losses)
 
+    @torch.no_grad()
     def pop_proposals(self, prop_list):
         prop_filtered = []
         for prop in prop_list:
             if torch.argmax(prop['cls_pred']) == 1:
                 prop_filtered.append(prop)
         return prop_filtered
+
+    def generate_targets(self, batch_dict, proposals):
+        target_dict = {'label': [],
+                       'center': [],
+                       'hclass': [],
+                       'hres': [],
+                       'sclass': [],
+                       'sres': []}
+
+        return target_dict
