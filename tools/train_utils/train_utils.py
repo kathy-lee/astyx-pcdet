@@ -21,7 +21,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             dataloader_iter = iter(train_loader)
             batch = next(dataloader_iter)
             print('new iters')
-
+        print('**********************')
+        for key,value in batch.items():
+            print(key)
+        print('**********************')
         lr_scheduler.step(accumulated_iter)
 
         try:
@@ -34,7 +37,10 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
 
         model.train()
         optimizer.zero_grad()
-
+        print('**********************')
+        print('frame id during training')
+        print(batch['frame_id'])
+        print('**********************')
         loss, tb_dict, disp_dict = model_func(model, batch)
 
         loss.backward()
