@@ -65,6 +65,10 @@ class PointNetv1(nn.Module):
         }
         return feature_dict
 
+    def get_loss(self, input, target):
+        loss = F.cross_entropy(input, target)
+        return loss
+
 
 class PointSeg(nn.Module):
     def __init__(self, num_class=3, input_channels=4):
@@ -102,6 +106,12 @@ class PointSeg(nn.Module):
         seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
         return seg_pred
 
+    def get_loss(self, input, target):
+        logits = F.log_softmax(input.view(-1, 2), dim=1)  # torch.Size([32768, 2])
+        mask_label = target.view(-1).long()  # torch.Size([32768])
+        loss = F.nll_loss(logits, mask_label)  # tensor(0.6361, grad_fn=<NllLossBackward>)
+        return loss
+
 
 class CenterRegNet(nn.Module):
     def __init__(self, n_classes=3):
@@ -138,6 +148,14 @@ class CenterRegNet(nn.Module):
         ###if np.isnan(x.cpu().detach().numpy()).any():
         ###    ipdb.set_trace()
         return x
+
+    def get_loss(self, center, center_label, stage1_center):
+        center_dist = torch.norm(center - center_label, dim=1)  # (32,)
+        center_loss = self.huber_loss(center_dist, delta=2.0)
+
+        stage1_center_dist = torch.norm(center - stage1_center, dim=1)  # (32,)
+        stage1_center_loss = self.huber_loss(stage1_center_dist, delta=1.0)
+        return center_loss, stage1_center_loss
 
 
 class BoxRegNet(nn.Module):
@@ -187,6 +205,72 @@ class BoxRegNet(nn.Module):
         box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
         return box_pred
 
+    def get_loss(self, center, center_label, heading_scores, heading_residual_normalized, heading_residual, \
+                 heading_class_label, heading_residual_label, \
+                 size_scores, size_residual_normalized, size_residual,
+                 size_class_label, size_residual_label, corner_loss_weight = 10.0):
+        bs = center.shape[0]
+        # Heading Loss
+        heading_class_loss = F.nll_loss(F.log_softmax(heading_scores, dim=1), \
+                                        heading_class_label.long())  # tensor(2.4505, grad_fn=<NllLossBackward>)
+        hcls_onehot = torch.eye(NUM_HEADING_BIN)[heading_class_label.long()].cuda()  # 32,12
+        heading_residual_normalized_label = \
+            heading_residual_label / (np.pi / NUM_HEADING_BIN)  # 32,
+        heading_residual_normalized_dist = torch.sum( \
+            heading_residual_normalized * hcls_onehot.float(), dim=1)  # 32,
+        ### Only compute reg loss on gt label
+        heading_residual_normalized_loss = \
+            self.huber_loss(heading_residual_normalized_dist -
+                            heading_residual_normalized_label, delta=1.0)  ###fix,2020.1.14
+        # Size loss
+        size_class_loss = F.nll_loss(F.log_softmax(size_scores, dim=1), \
+                                     size_class_label.long())  # tensor(2.0240, grad_fn=<NllLossBackward>)
+
+        scls_onehot = torch.eye(NUM_SIZE_CLUSTER)[size_class_label.long()].cuda()  # 32,8
+        scls_onehot_repeat = scls_onehot.view(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 1, 3)  # 32,8,3
+        predicted_size_residual_normalized_dist = torch.sum( \
+            size_residual_normalized * scls_onehot_repeat.cuda(), dim=1)  # 32,3
+        mean_size_arr_expand = torch.from_numpy(self.g_mean_size_arr).float().cuda() \
+            .view(1, NUM_SIZE_CLUSTER, 3)  # 1,8,3
+        mean_size_label = torch.sum(scls_onehot_repeat * mean_size_arr_expand, dim=1)  # 32,3
+        size_residual_label_normalized = size_residual_label / mean_size_label.cuda()
+
+        size_normalized_dist = torch.norm(size_residual_label_normalized - \
+                                          predicted_size_residual_normalized_dist, dim=1)  # 32
+        size_residual_normalized_loss = self.huber_loss(size_normalized_dist,
+                                                        delta=1.0)  # tensor(11.2784, grad_fn=<MeanBackward0>)
+
+        # Corner Loss
+        corners_3d = self.get_box3d_corners(center, heading_residual,
+                                            size_residual,
+                                            self.g_mean_size_arr).cuda()  # (bs,NH,NS,8,3)(32, 12, 8, 8, 3)
+        gt_mask = hcls_onehot.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER) * \
+                  scls_onehot.view(bs, 1, NUM_SIZE_CLUSTER).repeat(1, NUM_HEADING_BIN, 1)  # (bs,NH=12,NS=8)
+        corners_3d_pred = torch.sum(gt_mask.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1, 1) \
+                                    .float().cuda() * corners_3d, dim=[1, 2])  # (bs,8,3)
+        heading_bin_centers = torch.from_numpy(
+            np.arange(0, 2 * np.pi, 2 * np.pi / NUM_HEADING_BIN)).float().cuda()  # (NH,)
+        heading_label = heading_residual_label.view(bs, 1) + heading_bin_centers.view(1,
+                                                                                      NUM_HEADING_BIN)  # (bs,1)+(1,NH)=(bs,NH)
+
+        heading_label = torch.sum(hcls_onehot.float() * heading_label, 1)
+        mean_sizes = torch.from_numpy(self.g_mean_size_arr).float().view(1, NUM_SIZE_CLUSTER, 3).cuda()  # (1,NS,3)
+        size_label = mean_sizes + size_residual_label.view(bs, 1, 3)  # (1,NS,3)+(bs,1,3)=(bs,NS,3)
+        size_label = torch.sum(scls_onehot.view(bs, NUM_SIZE_CLUSTER, 1).float() * size_label, axis=[1])  # (B,3)
+
+        corners_3d_gt = self.get_box3d_corners_helper( \
+            center_label, heading_label, size_label)  # (B,8,3)
+        corners_3d_gt_flip = self.get_box3d_corners_helper( \
+            center_label, heading_label + np.pi, size_label)  # (B,8,3)
+
+        corners_dist = torch.min(torch.norm(corners_3d_pred - corners_3d_gt, dim=-1),
+                                 torch.norm(corners_3d_pred - corners_3d_gt_flip, dim=-1))
+        corners_loss = self.huber_loss(corners_dist, delta=1.0)
+
+        loss = heading_class_loss + size_class_loss + heading_residual_normalized_loss * 20 + \
+               size_residual_normalized_loss * 20 + corner_loss_weight * corners_loss
+        return loss
+
 
 class PointNetDetector(nn.Module):
     def __init__(self, model_cfg, dataset, n_classes=3, n_channel=4):
@@ -218,11 +302,10 @@ class PointNetDetector(nn.Module):
     def forward(self, batch_dict):  # bs,4,n
 
         proposals = self.generate_proposals(batch_dict)
-
         batch_target = self.generate_targets(batch_dict, proposals)
 
+        # 3D Proposal Classification PointNet
         feature_dict = self.PointNetv1(proposals['pts'])
-
         proposals = self.pop_proposals(proposals, feature_dict)
 
         # 3D Instance Segmentation PointNet
@@ -231,11 +314,10 @@ class PointNetDetector(nn.Module):
         # Mask Point Centroid
         object_pts_xyz, mask_xyz_mean, mask = self.point_cloud_masking(proposals['pts'], logits)  ###logits.detach()
 
-        # T-Net
+        # Object Center Regression T-Net
         object_pts_xyz = object_pts_xyz.cuda()
         center_delta = self.CenterReg(object_pts_xyz)  # (32,3)
         stage1_center = center_delta + mask_xyz_mean  # (32,3)
-
         # if (np.isnan(stage1_center.cpu().detach().numpy()).any()):
         #     ipdb.set_trace()
         object_pts_xyz_new = object_pts_xyz - \
@@ -245,19 +327,27 @@ class PointNetDetector(nn.Module):
         box_pred = self.BoxReg(object_pts_xyz_new)  # (32, 59)
 
         center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
-        size_scores, size_residuals_normalized, size_residuals = \
-            self.parse_output_to_tensors(box_pred, logits, mask, stage1_center)
-
+        size_scores, size_residuals_normalized, size_residuals = self.parse_output_to_tensors(box_pred)
         center = center_boxnet + stage1_center  # bs,3
 
         if self.training:
-            loss, tb_dict, disp_dict = self.get_loss(feature_dict['cls_score'], batch_target['cls_label'], logits,
-                                                     batch_target['label'], center, batch_target['center'],
-                                                     stage1_center, heading_scores, heading_residuals_normalized,
-                                                     heading_residuals, batch_target['hclass'], batch_target['hres'],
-                                                     size_scores, size_residuals_normalized, size_residuals,
-                                                     batch_target['sclass'], batch_target['sres'])
-
+            # loss, tb_dict, disp_dict = self.get_loss(feature_dict['cls_score'], batch_target['cls_label'], logits,
+            #                                          batch_target['label'], center, batch_target['center'],
+            #                                          stage1_center, heading_scores, heading_residuals_normalized,
+            #                                          heading_residuals, batch_target['hclass'], batch_target['hres'],
+            #                                          size_scores, size_residuals_normalized, size_residuals,
+            #                                          batch_target['sclass'], batch_target['sres'])
+            box_loss_weight = 1.0
+            cls_loss = self.PointCls.get_loss(feature_dict['cls_score'], batch_target['cls_label'])
+            seg_loss = self.PointSeg.get_loss(logits, batch_target['label'])
+            center_reg_loss = self.CenterReg.get_loss(center, batch_target['center'], stage1_center)
+            box_loss = self.BoxReg.get_loss(center, batch_target['cls_label'], heading_scores,
+                                            heading_residuals_normalized, heading_residuals, batch_target['hclass'],
+                                            batch_target['hres'], size_scores, size_residuals_normalized,
+                                            size_residuals, batch_target['sclass'], batch_target['sres'])
+            loss = cls_loss + seg_loss + box_loss_weight * (center_reg_loss + box_loss)
+            tb_dict = {}
+            disp_dict = {}
             ret_dict = {
                 'loss': loss
             }
@@ -373,11 +463,10 @@ class PointNetDetector(nn.Module):
         corners_loss = self.huber_loss(corners_dist, delta=1.0)
 
         # Weighted sum of all losses
-        total_loss = mask_loss + box_loss_weight * (center_loss + \
+        total_loss = mask_loss + box_loss_weight * (center_loss + stage1_center_loss + \
                                                     heading_class_loss + size_class_loss + \
                                                     heading_residual_normalized_loss * 20 + \
                                                     size_residual_normalized_loss * 20 + \
-                                                    stage1_center_loss + \
                                                     corner_loss_weight * corners_loss)
 
         losses = {
@@ -492,7 +581,7 @@ class PointNetDetector(nn.Module):
             ###else?
         return object_pts, indices
 
-    def parse_output_to_tensors(self, box_pred, logits, mask, stage1_center):
+    def parse_output_to_tensors(self, box_pred):
         '''
         :param box_pred: (bs,59)
         :param logits: (bs,1024,2)
