@@ -301,7 +301,7 @@ class PointNetDetector(nn.Module):
     def forward(self, batch_dict):  # bs,4,n
 
         proposals = self.generate_proposals(batch_dict)
-        batch_target = self.generate_targets(batch_dict, proposals)
+        batch_target = self.assign_targets(batch_dict, proposals)
 
         # 3D Proposal Classification PointNet
         feature_dict = self.PointNetv1(proposals['pts'])
@@ -336,6 +336,7 @@ class PointNetDetector(nn.Module):
             #                                          heading_residuals, batch_target['hclass'], batch_target['hres'],
             #                                          size_scores, size_residuals_normalized, size_residuals,
             #                                          batch_target['sclass'], batch_target['sres'])
+            seg_loss_weight = 1.0
             box_loss_weight = 1.0
             cls_loss = self.PointCls.get_loss(feature_dict['cls_score'], batch_target['cls_label'])
             seg_loss = self.PointSeg.get_loss(logits, batch_target['point_label'])
@@ -344,7 +345,7 @@ class PointNetDetector(nn.Module):
                                             heading_residuals_normalized, heading_residuals, batch_target['hclass'],
                                             batch_target['hres'], size_scores, size_residuals_normalized,
                                             size_residuals, batch_target['sclass'], batch_target['sres'])
-            loss = cls_loss + seg_loss + box_loss_weight * (center_reg_loss + box_loss)
+            loss = cls_loss + seg_loss_weight * seg_loss + box_loss_weight * (center_reg_loss + box_loss)
             tb_dict = {}
             disp_dict = {}
             ret_dict = {
@@ -688,15 +689,16 @@ class PointNetDetector(nn.Module):
                 prop_filtered.append(prop)
         return prop_filtered
 
-    def generate_targets(self, batch_dict, proposals):
-        v = np.zeros((1, 1))
-        target_dict = {'cls_label': v,
-                       'point_label': v,
-                       'center_label': v,
-                       'hclass': v,
-                       'hres': v,
-                       'sclass': v,
-                       'sres': v
-                       }
+    def assign_targets(self, batch_dict, proposals):
 
-        return target_dict
+        targets_dict = {}
+        pos_indices = [True if check_proposal(p) else False for p in proposals]
+        # 'cls_label': v,
+        # 'point_label': v,
+        # 'center_label': v,
+        # 'hclass': v,
+        # 'hres': v,
+        # 'sclass': v,
+        # 'sres': v
+
+        return targets_dict
