@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from pcdet.utils.box_utils import in_hull, boxes_to_corners_3d
+from pcdet.models.model_utils.model_nms_utils import class_agnostic_nms
+
 
 NUM_HEADING_BIN = 12
 NUM_SIZE_CLUSTER = 8 # one cluster for each type
@@ -305,7 +307,10 @@ class PointNetDetector(nn.Module):
 
         # 3D Proposal Classification PointNet
         feature_dict = self.PointNetv1(proposals['pts'])
-        rois = self.proposal_layer(proposals, feature_dict)
+        if self.training:
+            rois = self.get_rois(proposals, feature_dict, n_post_nms=2000)
+        else:
+            rois = self.get_rois(proposals, feature_dict, n_post_nms=300)
 
         # 3D Instance Segmentation PointNet
         logits = self.PointSeg(rois['pts'], feature_dict)  # bs,n,2
@@ -355,45 +360,6 @@ class PointNetDetector(nn.Module):
         else:
             pred_dicts, recall_dicts = self.post_processing(batch_dict)
             return pred_dicts, recall_dicts
-
-    def generate_proposals(self, batch_dict):
-        dx, dy, dz = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
-        batch_proposal_poses = []
-        batch_proposal_points = []
-        batch_frame_ids = []
-        for index, data in enumerate(batch_dict):
-            poses = []
-            for pt in data['points']:
-                pos = []
-                xc, yc, zc = pt
-                pos.append([xc, yc, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc, zc, dx, dy, dz])
-                pos.append([xc, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc, yc - dy / 4, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
-                pos_horizon = [[*pr, 0] for pr in pos]
-                pos_vertica = [[*pr, np.pi / 2] for pr in pos]
-                poses.append(pos_horizon + pos_vertica)
-            frame_ids = []
-            indices = []
-            corners3d = boxes_to_corners_3d(poses)
-            for k in range(len(poses)):
-                flag = in_hull(data['points'][:, 0:3], corners3d[k])
-                indice = [i for i, x in enumerate(flag) if x == 1]
-                indices.extend(indice)
-                frame_ids.append(data['frame_id'])
-            points = data['points'][indices]
-
-            batch_proposal_poses.append(*poses)
-            batch_proposal_points.append(*points)
-            batch_frame_ids.append(*frame_ids)
-
-        proposals = {'frame_id': batch_frame_ids, 'pos': batch_proposal_poses, 'pts': batch_proposal_points}
-        return proposals
 
     def point_cloud_masking(self, pts, logits, xyz_only=True):
         '''
@@ -559,15 +525,57 @@ class PointNetDetector(nn.Module):
         return torch.mean(losses)
 
     @torch.no_grad()
-    def proposal_layer(self, prop_list):
-        prop_filtered = []
-        for prop in prop_list:
-            if torch.argmax(prop['cls_pred']) == 1:
-                prop_filtered.append(prop)
-        return prop_filtered
+    def generate_proposals(self, batch_dict):
+        dx, dy, dz = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
+        batch_proposal_poses = []
+        batch_proposal_points = []
+        batch_frame_ids = []
+        for index, data in enumerate(batch_dict):
+            poses = []
+            for pt in data['points']:
+                pos = []
+                xc, yc, zc = pt
+                pos.append([xc, yc, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc, zc, dx, dy, dz])
+                pos.append([xc, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc, yc - dy / 4, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
+                pos.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
+                pos_horizon = [[*pr, 0] for pr in pos]
+                pos_vertica = [[*pr, np.pi / 2] for pr in pos]
+                poses.append(pos_horizon + pos_vertica)
+            frame_ids = []
+            indices = []
+            corners3d = boxes_to_corners_3d(poses)
+            for k in range(len(poses)):
+                flag = in_hull(data['points'][:, 0:3], corners3d[k])
+                indice = [i for i, x in enumerate(flag) if x == 1]
+                indices.extend(indice)
+                frame_ids.append(data['frame_id'])
+            points = data['points'][indices]
+
+            batch_proposal_poses.append(*poses)
+            batch_proposal_points.append(*points)
+            batch_frame_ids.append(*frame_ids)
+
+        proposals = {'frame_id': batch_frame_ids, 'pos': batch_proposal_poses, 'pts': batch_proposal_points}
+        return proposals
+
+    @torch.no_grad()
+    def get_rois(self, proposals, n_pre_nms=10000, n_post_nms=2000):
+        rois = []
+        order = proposals['cls_pred'].ravel().argsort()[::-1]
+        order = order[:n_pre_nms]
+        rois = proposals[order, :]
+        keep = class_agnostic_nms(rois)
+        keep = keep[:n_post_nms]
+        rois = rois[keep]
+        return rois
 
     def assign_targets(self, batch_dict, proposals):
-
         targets_dict = {}
         pos_indices = [True if check_proposal(p) else False for p in proposals]
         # 'cls_label': v,
