@@ -41,6 +41,11 @@ class PointNetv1(nn.Module):
         self.bn5 = nn.BatchNorm1d(1024)
         self.cls_layers = self.make_fc_layers(input_channels=input_channels, output_channels=num_classes + 1)
 
+        self.n_sample = 256
+        self.pos_iou_thresh = 0.7
+        self.neg_iou_thresh = 0.3
+        self.pos_ratio = 0.5
+
     def forward(self, batch_data):  # bs,4,n
         bs = batch_data.size()[0]
         n_pts = batch_data.size()[2]
@@ -51,12 +56,12 @@ class PointNetv1(nn.Module):
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,128,n
         out5 = F.relu(self.bn5(self.conv5(out4)))  # bs,1024,n
         global_feat = torch.max(out5, 2, keepdim=True)[0]  # bs,1024,1
-        cls_score = self.cls_layers(global_feat)
+        logits = self.cls_layers(global_feat)
 
         softmax = nn.Softmax(dim=1)
-        cls_pred = softmax(cls_score)
-        cls_pred = torch.max(cls_pred, 1)
-        one_hot_vec = torch.zeros(self.num_class)
+        cls_score = softmax(logits)
+        cls_pred = torch.max(cls_score, 1)
+        one_hot_vec = torch.zeros(bs, self.num_class, n_pts)
         one_hot_vec[cls_pred] = 1
 
         feature_dict = {
@@ -70,6 +75,29 @@ class PointNetv1(nn.Module):
     def get_loss(self, input, target):
         loss = F.cross_entropy(input, target)
         return loss
+
+    def assign_target(self, batch_data, anchor):
+
+        label = np.empty((len(batch_data),), dtype=np.int32)
+        label.fill(-1)
+        argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(anchor, batch_data)
+        label[max_ious < self.neg_iou_thresh] = 0
+        label[gt_argmax_ious] = 1
+        label[max_ious >= self.pos_iou_thresh] = 1
+
+        n_pos = int(self.pos_ratio * self.n_sample)
+        pos_index = np.where(label == 1)[0]
+        if len(pos_index) > n_pos:
+            disable_index = np.random.choice(
+                pos_index, size=(len(pos_index) - n_pos), replace=False)
+            label[disable_index] = -1
+
+        n_neg = self.n_sample - np.sum(label == 1)
+        neg_index = np.where(label == 0)[0]
+        if len(neg_index) > n_neg:
+            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
+            label[disable_index] = -1
+        return label
 
 
 class PointSeg(nn.Module):
@@ -92,7 +120,7 @@ class PointSeg(nn.Module):
         bs = data_dict['pts'].size()[0]
         n_pts = data_dict['pts'].size()[2]
 
-        expand_one_hot_vec = data_dict['cls_score'].view(bs, -1, 1)  # bs,3,1
+        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1, 1)  # bs,3,1
         expand_global_feat = torch.cat([data_dict['global_feat'], expand_one_hot_vec], 1)  # bs,1027,1
         expand_global_feat_repeat = expand_global_feat.view(bs, -1, 1).repeat(1, 1, n_pts)  # bs,1027,n
         concat_feat = torch.cat([data_dict['local_feat'], expand_global_feat_repeat], 1)
@@ -303,14 +331,16 @@ class PointNetDetector(nn.Module):
     def forward(self, batch_dict):  # bs,4,n
 
         proposals = self.generate_proposals(batch_dict)
-        batch_target = self.assign_targets(batch_dict, proposals)
 
         # 3D Proposal Classification PointNet
         feature_dict = self.PointNetv1(proposals['pts'])
-        if self.training:
-            rois = self.get_rois(proposals, feature_dict, n_post_nms=2000)
-        else:
-            rois = self.get_rois(proposals, feature_dict, n_post_nms=300)
+
+        # if self.training:
+        #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
+        #     rois, gt_roi_loc, gt_roi_label = self.proposal_target_creator(rois, batch_dict)
+        # else:
+        #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=6000, n_post_nms=300)
+        rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
 
         # 3D Instance Segmentation PointNet
         logits = self.PointSeg(rois['pts'], feature_dict)  # bs,n,2
@@ -341,6 +371,7 @@ class PointNetDetector(nn.Module):
             #                                          heading_residuals, batch_target['hclass'], batch_target['hres'],
             #                                          size_scores, size_residuals_normalized, size_residuals,
             #                                          batch_target['sclass'], batch_target['sres'])
+            batch_target = self.assign_targets(batch_dict, proposals)
             seg_loss_weight = 1.0
             box_loss_weight = 1.0
             cls_loss = self.PointCls.get_loss(feature_dict['cls_score'], batch_target['cls_label'])
@@ -360,6 +391,28 @@ class PointNetDetector(nn.Module):
         else:
             pred_dicts, recall_dicts = self.post_processing(batch_dict)
             return pred_dicts, recall_dicts
+
+    def assign_targets(self, batch_dict, proposals):
+
+        '''
+        :return:
+            batch_target['cls_label']: assigned targets for classification of proposals
+            batch_target['point_label']: assigned targets for point segmentation
+            batch_target['center_label']: center regression label
+            batch_target['hclass']: assigned head label for box regression
+            batch_target['hres']: head regression label
+            batch_target['sclass']: assigned size label for box regression
+            batch_target['sres']: size regression label
+        '''
+        cls_label = self.PointCls.assign_target()
+
+        point_label = self.PointSeg.assign_target()
+
+        target_dict = {
+            'cls_label': cls_label,
+            'point_label': point_label
+        }
+        return target_dict
 
     def point_cloud_masking(self, pts, logits, xyz_only=True):
         '''
@@ -575,15 +628,3 @@ class PointNetDetector(nn.Module):
         rois = rois[keep]
         return rois
 
-    def assign_targets(self, batch_dict, proposals):
-        targets_dict = {}
-        pos_indices = [True if check_proposal(p) else False for p in proposals]
-        # 'cls_label': v,
-        # 'point_label': v,
-        # 'center_label': v,
-        # 'hclass': v,
-        # 'hres': v,
-        # 'sclass': v,
-        # 'sres': v
-
-        return targets_dict
