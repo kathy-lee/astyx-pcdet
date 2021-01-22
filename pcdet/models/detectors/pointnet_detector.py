@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from pcdet.utils.box_utils import in_hull, boxes_to_corners_3d
 from pcdet.models.model_utils.model_nms_utils import class_agnostic_nms
+from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
 
 
 NUM_HEADING_BIN = 12
@@ -98,6 +99,15 @@ class PointNetv1(nn.Module):
             disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
             label[disable_index] = -1
         return label
+
+    def _calc_ious(self, anchor, bbox):
+        ious = boxes_iou3d_gpu(anchor, bbox) # (N,K)
+        argmax_ious = ious.argmax(axis=1)
+        max_ious = ious[:, argmax_ious]
+        gt_argmax_ious = ious.argmax(axis=0)
+        gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]
+        gt_argmax_ious = np.where(ious == gt_max_ious)[0] # K
+        return argmax_ious, max_ious, gt_argmax_ious
 
 
 class PointSeg(nn.Module):
