@@ -73,41 +73,9 @@ class PointNetv1(nn.Module):
         }
         return feature_dict
 
-    def get_loss(self, input, target):
-        loss = F.cross_entropy(input, target)
+    def get_loss(self, pred, target):
+        loss = F.cross_entropy(pred, target)
         return loss
-
-    def assign_target(self, batch_data, anchor):
-
-        label = np.empty((len(batch_data),), dtype=np.int32)
-        label.fill(-1)
-        argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(anchor, batch_data)
-        label[max_ious < self.neg_iou_thresh] = 0
-        label[gt_argmax_ious] = 1
-        label[max_ious >= self.pos_iou_thresh] = 1
-
-        n_pos = int(self.pos_ratio * self.n_sample)
-        pos_index = np.where(label == 1)[0]
-        if len(pos_index) > n_pos:
-            disable_index = np.random.choice(
-                pos_index, size=(len(pos_index) - n_pos), replace=False)
-            label[disable_index] = -1
-
-        n_neg = self.n_sample - np.sum(label == 1)
-        neg_index = np.where(label == 0)[0]
-        if len(neg_index) > n_neg:
-            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
-            label[disable_index] = -1
-        return label
-
-    def _calc_ious(self, anchor, bbox):
-        ious = boxes_iou3d_gpu(anchor, bbox) # (N,K)
-        argmax_ious = ious.argmax(axis=1)
-        max_ious = ious[:, argmax_ious]
-        gt_argmax_ious = ious.argmax(axis=0)
-        gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]
-        gt_argmax_ious = np.where(ious == gt_max_ious)[0] # K
-        return argmax_ious, max_ious, gt_argmax_ious
 
 
 class PointSeg(nn.Module):
@@ -127,8 +95,8 @@ class PointSeg(nn.Module):
         self.cls_layers = self.make_fc_layers(input_channels=input_channels, output_channels=num_classes + 1)
 
     def forward(self, data_dict):  # bs,4,n
-        bs = data_dict['pts'].size()[0]
-        n_pts = data_dict['pts'].size()[2]
+        bs = data_dict['cls_pred'].size()[0]
+        n_pts = data_dict['cls_pred'].size()[2]
 
         expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1, 1)  # bs,3,1
         expand_global_feat = torch.cat([data_dict['global_feat'], expand_one_hot_vec], 1)  # bs,1027,1
@@ -146,8 +114,8 @@ class PointSeg(nn.Module):
         seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
         return seg_pred
 
-    def get_loss(self, input, target):
-        logits = F.log_softmax(input.view(-1, 2), dim=1)  # torch.Size([32768, 2])
+    def get_loss(self, pred, target):
+        logits = F.log_softmax(pred.view(-1, 2), dim=1)  # torch.Size([32768, 2])
         mask_label = target.view(-1).long()  # torch.Size([32768])
         loss = F.nll_loss(logits, mask_label)  # tensor(0.6361, grad_fn=<NllLossBackward>)
         return loss
@@ -180,7 +148,7 @@ class CenterRegNet(nn.Module):
         x = F.relu(self.bn2(self.conv2(x)))  # bs,128,n
         x = F.relu(self.bn3(self.conv3(x)))  # bs,256,n
         x = torch.max(x, 2)[0]  # bs,256
-        expand_one_hot_vec = data_dict['cls_score'].vw(bs, -1)  # bs,3
+        expand_one_hot_vec = data_dict['cls_pred'].vw(bs, -1)  # bs,3
         x = torch.cat([x, expand_one_hot_vec], 1)  # bs,259
         x = F.relu(self.fcbn1(self.fc1(x)))  # bs,256
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,128
@@ -238,7 +206,7 @@ class BoxRegNet(nn.Module):
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,512,n
         global_feat = torch.max(out4, 2, keepdim=False)[0]  # bs,512
 
-        expand_one_hot_vec = data_dict['cls_score'].view(bs, -1)  # bs,3
+        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1)  # bs,3
         expand_global_feat = torch.cat([data_dict['global_feat'], expand_one_hot_vec], 1)  # bs,515
 
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
@@ -255,14 +223,11 @@ class BoxRegNet(nn.Module):
         heading_class_loss = F.nll_loss(F.log_softmax(heading_scores, dim=1),
                                         heading_class_label.long())  # tensor(2.4505, grad_fn=<NllLossBackward>)
         hcls_onehot = torch.eye(NUM_HEADING_BIN)[heading_class_label.long()].cuda()  # 32,12
-        heading_residual_normalized_label = \
-            heading_residual_label / (np.pi / NUM_HEADING_BIN)  # 32,
-        heading_residual_normalized_dist = torch.sum(
-            heading_residual_normalized * hcls_onehot.float(), dim=1)  # 32,
+        heading_residual_normalized_label = heading_residual_label / (np.pi / NUM_HEADING_BIN)  # 32
+        heading_residual_normalized_dist = torch.sum(heading_residual_normalized * hcls_onehot.float(), dim=1)  # 32
         ### Only compute reg loss on gt label
         heading_residual_normalized_loss = \
-            self.huber_loss(heading_residual_normalized_dist -
-                            heading_residual_normalized_label, delta=1.0)  ###fix,2020.1.14
+            self.huber_loss(heading_residual_normalized_dist - heading_residual_normalized_label, delta=1.0)
         # Size loss
         size_class_loss = F.nll_loss(F.log_softmax(size_scores, dim=1),
                                      size_class_label.long())  # tensor(2.0240, grad_fn=<NllLossBackward>)
@@ -271,8 +236,7 @@ class BoxRegNet(nn.Module):
         scls_onehot_repeat = scls_onehot.view(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 1, 3)  # 32,8,3
         predicted_size_residual_normalized_dist = torch.sum(
             size_residual_normalized * scls_onehot_repeat.cuda(), dim=1)  # 32,3
-        mean_size_arr_expand = torch.from_numpy(self.g_mean_size_arr).float().cuda() \
-            .view(1, NUM_SIZE_CLUSTER, 3)  # 1,8,3
+        mean_size_arr_expand = torch.from_numpy(self.g_mean_size_arr).float().cuda().view(1, NUM_SIZE_CLUSTER, 3)#1,8,3
         mean_size_label = torch.sum(scls_onehot_repeat * mean_size_arr_expand, dim=1)  # 32,3
         size_residual_label_normalized = size_residual_label / mean_size_label.cuda()
 
@@ -353,10 +317,11 @@ class PointNetDetector(nn.Module):
         rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
 
         # 3D Instance Segmentation PointNet
-        logits = self.PointSeg(rois['pts'], feature_dict)  # bs,n,2
+        seg_logits = self.PointSeg(rois)  # bs,n,2
 
         # Mask Point Centroid
-        object_pts_xyz, mask_xyz_mean, mask = self.point_cloud_masking(rois['pts'], logits)  ###logits.detach()
+        object_pts_xyz, mask_xyz_mean, mask = self.point_cloud_masking(rois['pts'], seg_logits)  ###logits.detach()
+
 
         # Object Center Regression T-Net
         object_pts_xyz = object_pts_xyz.cuda()
@@ -371,7 +336,7 @@ class PointNetDetector(nn.Module):
         box_pred = self.BoxReg(object_pts_xyz_new)  # (32, 59)
 
         center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
-        size_scores, size_residuals_normalized, size_residuals = self.parse_output_to_tensors(box_pred)
+        size_scores, size_residuals_normalized, size_residuals = self.parse_output_to_tensors(box_pred, seg_logits, mask, stage1_center)
         center = center_boxnet + stage1_center  # bs,3
 
         if self.training:
@@ -381,11 +346,11 @@ class PointNetDetector(nn.Module):
             #                                          heading_residuals, batch_target['hclass'], batch_target['hres'],
             #                                          size_scores, size_residuals_normalized, size_residuals,
             #                                          batch_target['sclass'], batch_target['sres'])
-            batch_target = self.assign_targets(batch_dict, proposals)
+            batch_target = self.assign_targets(batch_dict, proposals, rois)
             seg_loss_weight = 1.0
             box_loss_weight = 1.0
             cls_loss = self.PointCls.get_loss(feature_dict['cls_score'], batch_target['cls_label'])
-            seg_loss = self.PointSeg.get_loss(logits, batch_target['point_label'])
+            seg_loss = self.PointSeg.get_loss(seg_logits, batch_target['point_label'])
             center_reg_loss = self.CenterReg.get_loss(center, batch_target['center_label'], stage1_center)
             box_loss = self.BoxReg.get_loss(center, batch_target['center_label'], heading_scores,
                                             heading_residuals_normalized, heading_residuals, batch_target['hclass'],
@@ -402,7 +367,7 @@ class PointNetDetector(nn.Module):
             pred_dicts, recall_dicts = self.post_processing(batch_dict)
             return pred_dicts, recall_dicts
 
-    def assign_targets(self, batch_dict, proposals):
+    def assign_targets(self, batch_dict, proposals, rois):
 
         '''
         :return:
@@ -414,15 +379,53 @@ class PointNetDetector(nn.Module):
             batch_target['sclass']: assigned size label for box regression
             batch_target['sres']: size regression label
         '''
-        cls_label = self.PointCls.assign_target()
+        cls_label = self.assign_proposal_target(batch_dict, proposals)
 
-        point_label = self.PointSeg.assign_target()
+        point_label = self.assign_seg_target(batch_dict, rois)
+
+        center_label =
 
         target_dict = {
             'cls_label': cls_label,
-            'point_label': point_label
+            'point_label': point_label,
+            'center_label': center_label
         }
         return target_dict
+
+    def assign_proposal_target(self, batch_data, anchor):
+
+        label = np.empty((len(batch_data),), dtype=np.int32)
+        label.fill(-1)
+        argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(anchor, batch_data['gt_box'])
+        label[max_ious < self.neg_iou_thresh] = 0
+        label[gt_argmax_ious] = 1
+        label[max_ious >= self.pos_iou_thresh] = 1
+
+        n_pos = int(self.pos_ratio * self.n_sample)
+        pos_index = np.where(label == 1)[0]
+        if len(pos_index) > n_pos:
+            disable_index = np.random.choice(
+                pos_index, size=(len(pos_index) - n_pos), replace=False)
+            label[disable_index] = -1
+
+        n_neg = self.n_sample - np.sum(label == 1)
+        neg_index = np.where(label == 0)[0]
+        if len(neg_index) > n_neg:
+            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
+            label[disable_index] = -1
+        return label
+
+    def _calc_ious(self, anchor, bbox):
+        ious = boxes_iou3d_gpu(anchor, bbox)  # (N,K)
+        argmax_ious = ious.argmax(axis=1)
+        max_ious = ious[:, argmax_ious]  # [1,N]
+        gt_argmax_ious = ious.argmax(axis=0)
+        gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
+        gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # K
+        return argmax_ious, max_ious, gt_argmax_ious
+
+    def assign_seg_target(self, batch_data, anchor):
+
 
     def point_cloud_masking(self, pts, logits, xyz_only=True):
         '''
@@ -628,11 +631,11 @@ class PointNetDetector(nn.Module):
         return proposals
 
     @torch.no_grad()
-    def get_rois(self, proposals, n_pre_nms=10000, n_post_nms=2000):
-        rois = []
+    def get_rois(self, proposals, features, n_pre_nms=10000, n_post_nms=2000):
+        rois = [dict(item, **{'feature': features[index]}) for index, item in enumerate(proposals)]
         order = proposals['cls_pred'].ravel().argsort()[::-1]
         order = order[:n_pre_nms]
-        rois = proposals[order, :]
+        rois = rois[order, :]
         keep = class_agnostic_nms(rois)
         keep = keep[:n_post_nms]
         rois = rois[keep]
