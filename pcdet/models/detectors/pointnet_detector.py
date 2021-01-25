@@ -69,7 +69,7 @@ class PointNetv1(nn.Module):
             'local_feat': out2,
             'global_feat': global_feat,
             'cls_pred': one_hot_vec,
-            'cls_score': cls_score
+            'cls_logits': logits
         }
         return feature_dict
 
@@ -300,7 +300,7 @@ class PointNetDetector(nn.Module):
         proposals = self.generate_proposals(batch_dict)
 
         # 3D Proposal Classification PointNet
-        feature_dict = self.PointNetv1(proposals['pts'])
+        feature_dict = self.PointCls(proposals['pts'])
 
         # if self.training:
         #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
@@ -328,20 +328,31 @@ class PointNetDetector(nn.Module):
         center = box_pred[:, :3] + stage1_center  # bs,3
 
         # rewrite foward
-        proposals = self.generate_proposals(batch_dict)
-        feature_dict = self.PointNetv1(proposals)
-        rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000) # rois{'feature_dict'}
-        self.PointSeg(rois) # rois{'seg_logits'}
-        self.point_cloud_masking(rois) # rois{'pts', 'mask_mean(=center)', 'frame_id', 'pos'}
-        self.CenterReg(rois) # update new estimated center and new pts
-        self.BoxReg(rois) # update new estimated center, rois{ 3 for heading, 3 for size }
+        proposals = self.generate_proposals(batch_dict) # proposals{'pts', 'frame_id', 'pos'}
+        feature_dict = self.PointCls(proposals)
+        rois = self.get_rois(proposals, feature_dict) # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        rois = self.PointSeg(rois) # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
+        rois = self.point_cloud_masking(rois) # add rois{'center'}
+        rois = self.CenterReg(rois) # update rois{'center'} and {'pts'}
+        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }
+
+        # # rewrite forward
+        # proposals = self.generate_proposals(batch_dict)
+        # feature, cls_pred, cls_logits = self.PointCls(proposals)
+        # rois = self.get_rois(proposals, feature, cls_pred) # rois{'pts', 'pos', 'frame_id'}
+        # seg_logits = self.PointSeg(rois['pts'], cls_pred, feature)
+        # rois, center_mask = self.point_cloud_masking(rois, seg_logits)
+        # center_delta = self.CenterReg(rois['pts'], cls_pred)
+        # rois['pts'] = rois['pts'] - center_delta.view(center_delta.shape[0], -1, 1).repeat(1, 1, rois['pts'].shape[-1])
+        # box_reg_pred = self.BoxReg(rois['pts'], cls_pred)
+        # center_pred = center_mask + center_delta + box_reg_pred[:, :3]
 
 
         if self.training:
             batch_target = self.assign_targets(batch_dict, proposals, rois)
             seg_loss_weight = 1.0
             box_loss_weight = 1.0
-            cls_loss = self.PointCls.get_loss(feature_dict['cls_score'], batch_target['cls_label'])
+            cls_loss = self.PointCls.get_loss(feature_dict['cls_logits'], batch_target['cls_label'])
             seg_loss = self.PointSeg.get_loss(seg_logits, batch_target['point_label'])
             center_reg_loss = self.CenterReg.get_loss(center, batch_target['center_label'], stage1_center)
             box_reg_loss = self.BoxReg.get_loss(center, batch_target, box_pred)
