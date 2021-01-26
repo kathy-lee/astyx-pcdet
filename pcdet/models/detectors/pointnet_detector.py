@@ -157,13 +157,10 @@ class CenterRegNet(nn.Module):
         #     ipdb.set_trace()
         return x
 
-    def get_loss(self, center, center_label, stage1_center):
-        center_dist = torch.norm(center - center_label, dim=1)  # (32,)
-        center_loss = self.huber_loss(center_dist, delta=2.0)
-
-        stage1_center_dist = torch.norm(center - stage1_center, dim=1)  # (32,)
-        stage1_center_loss = self.huber_loss(stage1_center_dist, delta=1.0)
-        return center_loss, stage1_center_loss
+    def get_loss(self, center_pred, center_label):
+        center_dist = torch.norm(center_pred - center_label, dim=1)  # (32,)
+        center_loss = self.huber_loss(center_dist, delta=1.0)
+        return center_loss
 
 
 class BoxRegNet(nn.Module):
@@ -215,7 +212,7 @@ class BoxRegNet(nn.Module):
         return box_pred
 
     def get_loss(self, center, batch_target, box_pred, corner_loss_weight=10.0):
-        bs = center.shape[0]
+        bs = box_pred.shape[0]
 
         center_label = batch_target['center_label']
         head_cls_label = batch_target['hclass']
@@ -224,6 +221,10 @@ class BoxRegNet(nn.Module):
         size_res_label = batch_target['sres']
 
         _, head_scores, head_res_norm, head_res, size_scores, size_res_norm, size_res = self.parse_to_tensors(box_pred)
+
+        # center residual reg loss
+        center_dist = torch.norm(center - center_label, dim=1)  # (32,)
+        center_loss = self.huber_loss(center_dist, delta=2.0)
 
         # Heading Loss
         head_cls_loss = F.nll_loss(F.log_softmax(head_scores, dim=1), head_cls_label.long())  # tensor(2.4505, grad_fn=<NllLossBackward>)
@@ -262,7 +263,7 @@ class BoxRegNet(nn.Module):
                                  torch.norm(corners_3d_pred - corners_3d_gt_flip, dim=-1))
         corners_loss = self.huber_loss(corners_dist, delta=1.0)
 
-        loss = head_cls_loss + size_cls_loss + \
+        loss = center_loss + head_cls_loss + size_cls_loss + \
                head_res_norm_loss * 20 + size_res_norm_loss * 20 \
                + corner_loss_weight * corners_loss
         return loss
@@ -297,35 +298,35 @@ class PointNetDetector(nn.Module):
 
     def forward(self, batch_dict):  # bs,4,n
 
-        proposals = self.generate_proposals(batch_dict)
-
-        # 3D Proposal Classification PointNet
-        feature_dict = self.PointCls(proposals['pts'])
-
-        # if self.training:
-        #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
-        #     rois, gt_roi_loc, gt_roi_label = self.proposal_target_creator(rois, batch_dict)
-        # else:
-        #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=6000, n_post_nms=300)
-        rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
-
-        # 3D Instance Segmentation PointNet
-        seg_logits = self.PointSeg(rois)  # bs,n,2
-
-        # Mask Point Centroid
-        pts_xyz, mask_xyz_mean = self.point_cloud_masking(rois['pts'], seg_logits)  ###logits.detach()
-
-        # Object Center Regression T-Net
-        pts_xyz = pts_xyz.cuda()
-        center_delta = self.CenterReg(pts_xyz)  # (32,3)
-        stage1_center = center_delta + mask_xyz_mean  # (32,3)
-        # if (np.isnan(stage1_center.cpu().detach().numpy()).any()):
-        #     ipdb.set_trace()
-        pts_xyz_new = pts_xyz - center_delta.view(center_delta.shape[0], -1, 1).repeat(1, 1, pts_xyz.shape[-1])
-
-        # 3D Box Estimation
-        box_pred = self.BoxReg(pts_xyz_new)  # (32, 59)
-        center = box_pred[:, :3] + stage1_center  # bs,3
+        # proposals = self.generate_proposals(batch_dict)
+        #
+        # # 3D Proposal Classification PointNet
+        # feature_dict = self.PointCls(proposals['pts'])
+        #
+        # # if self.training:
+        # #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
+        # #     rois, gt_roi_loc, gt_roi_label = self.proposal_target_creator(rois, batch_dict)
+        # # else:
+        # #     rois = self.get_rois(proposals, feature_dict, n_pre_nms=6000, n_post_nms=300)
+        # rois = self.get_rois(proposals, feature_dict, n_pre_nms=12000, n_post_nms=2000)
+        #
+        # # 3D Instance Segmentation PointNet
+        # seg_logits = self.PointSeg(rois)  # bs,n,2
+        #
+        # # Mask Point Centroid
+        # pts_xyz, mask_xyz_mean = self.point_cloud_masking(rois['pts'], seg_logits)  ###logits.detach()
+        #
+        # # Object Center Regression T-Net
+        # pts_xyz = pts_xyz.cuda()
+        # center_delta = self.CenterReg(pts_xyz)  # (32,3)
+        # stage1_center = center_delta + mask_xyz_mean  # (32,3)
+        # # if (np.isnan(stage1_center.cpu().detach().numpy()).any()):
+        # #     ipdb.set_trace()
+        # pts_xyz_new = pts_xyz - center_delta.view(center_delta.shape[0], -1, 1).repeat(1, 1, pts_xyz.shape[-1])
+        #
+        # # 3D Box Estimation
+        # box_pred = self.BoxReg(pts_xyz_new)  # (32, 59)
+        # center = box_pred[:, :3] + stage1_center  # bs,3
 
         # rewrite foward
         proposals = self.generate_proposals(batch_dict) # proposals{'pts', 'frame_id', 'pos'}
@@ -334,7 +335,7 @@ class PointNetDetector(nn.Module):
         rois = self.PointSeg(rois) # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
         rois = self.point_cloud_masking(rois) # add rois{'center'}
         rois = self.CenterReg(rois) # update rois{'center'} and {'pts'}
-        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }
+        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }, put old center in rois{'center_old'}
 
         # # rewrite forward
         # proposals = self.generate_proposals(batch_dict)
@@ -347,15 +348,17 @@ class PointNetDetector(nn.Module):
         # box_reg_pred = self.BoxReg(rois['pts'], cls_pred)
         # center_pred = center_mask + center_delta + box_reg_pred[:, :3]
 
-
         if self.training:
             batch_target = self.assign_targets(batch_dict, proposals, rois)
             seg_loss_weight = 1.0
             box_loss_weight = 1.0
             cls_loss = self.PointCls.get_loss(feature_dict['cls_logits'], batch_target['cls_label'])
-            seg_loss = self.PointSeg.get_loss(seg_logits, batch_target['point_label'])
-            center_reg_loss = self.CenterReg.get_loss(center, batch_target['center_label'], stage1_center)
-            box_reg_loss = self.BoxReg.get_loss(center, batch_target, box_pred)
+            seg_loss = self.PointSeg.get_loss(rois['seg_logits'], batch_target['point_label'])
+            # center_reg_loss = self.CenterReg.get_loss(batch_target['center_label'], stage1_center)
+            # box_reg_loss = self.BoxReg.get_loss(center, batch_target, box_pred)
+            center_reg_loss = self.CenterReg.get_loss(rois['center_old'], batch_target['center_label'])
+            box_reg_loss = self.BoxReg.get_loss(rois['center'], batch_target, rois['box_pred'])
+
             loss = cls_loss + seg_loss_weight * seg_loss + box_loss_weight * (center_reg_loss + box_reg_loss)
             tb_dict = {}
             disp_dict = {}
