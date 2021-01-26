@@ -112,7 +112,10 @@ class PointSeg(nn.Module):
         x = self.dconv5(x)  # bs, 2, n
 
         seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
-        return seg_pred
+        data_dict.update({'seg_logits': seg_pred})
+        data_dict.pop('global_feat')
+        data_dict.pop('local_feat')
+        return data_dict
 
     def get_loss(self, pred, target):
         logits = F.log_softmax(pred.view(-1, 2), dim=1)  # torch.Size([32768, 2])
@@ -153,8 +156,11 @@ class CenterRegNet(nn.Module):
         x = F.relu(self.fcbn1(self.fc1(x)))  # bs,256
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,128
         x = self.fc3(x)  # bs,
-        # if np.isnan(x.cpu().detach().numpy()).any():
-        #     ipdb.set_trace()
+
+        center_new = data_dict['center'] + x
+        pts_new = data_dict['pts'] - x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['pts'].shape[-1])
+        data_dict.update({'center': center_new})   # (32,3)
+        data_dict.update({'pts': pts_new})
         return x
 
     def get_loss(self, center_pred, center_label):
@@ -209,6 +215,12 @@ class BoxRegNet(nn.Module):
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,256
         box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
+
+        center_delta = box_pred[:, :3]
+        center = data_dict['center']
+        data_dict.update({'center_last': center})
+        data_dict.update({'center': center + center_delta})
+        data_dict.update({'box_reg_pred': box_pred})
         return box_pred
 
     def get_loss(self, center, batch_target, box_pred, corner_loss_weight=10.0):
@@ -328,14 +340,14 @@ class PointNetDetector(nn.Module):
         # box_pred = self.BoxReg(pts_xyz_new)  # (32, 59)
         # center = box_pred[:, :3] + stage1_center  # bs,3
 
-        # rewrite foward
+        # rewrite forward
         proposals = self.generate_proposals(batch_dict) # proposals{'pts', 'frame_id', 'pos'}
-        feature_dict = self.PointCls(proposals)
+        feature_dict = self.PointCls(proposals['pts'])
         rois = self.get_rois(proposals, feature_dict) # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
         rois = self.PointSeg(rois) # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
         rois = self.point_cloud_masking(rois) # add rois{'center'}
         rois = self.CenterReg(rois) # update rois{'center'} and {'pts'}
-        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }, put old center in rois{'center_old'}
+        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }, move old center in rois{'center_last'}
 
         # # rewrite forward
         # proposals = self.generate_proposals(batch_dict)
@@ -356,7 +368,7 @@ class PointNetDetector(nn.Module):
             seg_loss = self.PointSeg.get_loss(rois['seg_logits'], batch_target['point_label'])
             # center_reg_loss = self.CenterReg.get_loss(batch_target['center_label'], stage1_center)
             # box_reg_loss = self.BoxReg.get_loss(center, batch_target, box_pred)
-            center_reg_loss = self.CenterReg.get_loss(rois['center_old'], batch_target['center_label'])
+            center_reg_loss = self.CenterReg.get_loss(rois['center_last'], batch_target['center_label'])
             box_reg_loss = self.BoxReg.get_loss(rois['center'], batch_target, rois['box_pred'])
 
             loss = cls_loss + seg_loss_weight * seg_loss + box_loss_weight * (center_reg_loss + box_reg_loss)
@@ -430,13 +442,15 @@ class PointNetDetector(nn.Module):
     def assign_seg_target(self, batch_data, anchor):
 
 
-    def point_cloud_masking(self, pts, logits, xyz_only=True):
+    def point_cloud_masking(self, data_dict, xyz_only=True):
         '''
         :param pts: bs,c,n in frustum
         :param logits: bs,n,2
         :param xyz_only: bool
         :return:
         '''
+        pts = data_dict['pts']
+        logits = data_dict['seg_logits']
         bs = pts.shape[0]
         n_pts = pts.shape[2]
         # Binary Classification for each point
@@ -457,8 +471,9 @@ class PointNetDetector(nn.Module):
         object_pts, _ = self.gather_object_pts(pts_stage1, mask, self.NUM_OBJECT_POINT)
         # (32,512,3) (32,512)
         object_pts = object_pts.reshape(bs, self.NUM_OBJECT_POINT, -1)
-        object_pts = object_pts.float().view(bs, 3, -1)
-        return object_pts, mask_xyz_mean.squeeze()
+        data_dict.update({'pts': object_pts.float().view(bs, 3, -1)})
+        data_dict.update({'center': mask_xyz_mean.squeeze()})
+        return data_dict
 
     def gather_object_pts(self, pts, mask, n_pts):
         '''
