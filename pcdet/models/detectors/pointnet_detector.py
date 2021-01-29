@@ -5,6 +5,7 @@ import numpy as np
 from pcdet.utils.box_utils import in_hull, boxes_to_corners_3d
 from pcdet.models.model_utils.model_nms_utils import class_agnostic_nms
 from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
+from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
 
 NUM_HEADING_BIN = 12
@@ -442,6 +443,8 @@ class PointNetDetector(nn.Module):
     def assign_seg_target(self, batch_data, anchor):
         batch_size = batch_data.shape[0]
         points = batch_data['pts']
+        bs_idx = points[:, 0]
+        gt_boxes = batch_data['gt_box']
         point_cls_labels = points.new_zeros(points.shape[0]).long()
         for k in range(batch_size):
             bs_mask = (bs_idx == k)
@@ -451,13 +454,7 @@ class PointNetDetector(nn.Module):
                 points_single.unsqueeze(dim=0), gt_boxes[k:k + 1, :, 0:7].contiguous()
             ).long().squeeze(dim=0)
             box_fg_flag = (box_idxs_of_pts >= 0)
-            extend_box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
-                points_single.unsqueeze(dim=0), extend_gt_boxes[k:k+1, :, 0:7].contiguous()
-            ).long().squeeze(dim=0)
             fg_flag = box_fg_flag
-            ignore_flag = fg_flag ^ (extend_box_idxs_of_pts >= 0)
-            point_cls_labels_single[ignore_flag] = -1
-
             gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
             point_cls_labels_single[fg_flag] = 1 if self.num_class == 1 else gt_box_of_fg_points[:, -1].long()
             point_cls_labels[bs_mask] = point_cls_labels_single
