@@ -9,26 +9,27 @@ from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
 
 NUM_HEADING_BIN = 12
-NUM_SIZE_CLUSTER = 8 # one cluster for each type
+NUM_SIZE_CLUSTER = 8  # one cluster for each type
 
 
-def make_fc_layers(fc_cfg, input_channels, output_channels):
+def make_fc_layers(fc_list, input_channels, output_channels):
     fc_layers = []
     c_in = input_channels
-    for k in range(0, fc_cfg.__len__()):
+    for k in range(0, fc_list.__len__()):
         fc_layers.extend([
-            nn.Linear(c_in, fc_cfg[k], bias=False),
-            nn.BatchNorm1d(fc_cfg[k]),
+            nn.Linear(c_in, fc_list[k], bias=False),
+            nn.BatchNorm1d(fc_list[k]),
             nn.ReLU(),
         ])
-        c_in = fc_cfg[k]
+        c_in = fc_list[k]
     fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
     return nn.Sequential(*fc_layers)
 
 
 class PointNetv1(nn.Module):
-    def __init__(self, num_classes=3, input_channels=4):
+    def __init__(self, model_cfg, num_classes=3, input_channels=4):
         super(PointNetv1, self).__init__()
+        self.model_cfg = model_cfg
         self.num_classes = num_classes
 
         self.conv1 = nn.Conv1d(input_channels, 64, 1)
@@ -41,8 +42,8 @@ class PointNetv1(nn.Module):
         self.bn3 = nn.BatchNorm1d(64)
         self.bn4 = nn.BatchNorm1d(128)
         self.bn5 = nn.BatchNorm1d(1024)
-        self.cls_layers = self.make_fc_layers(input_channels=input_channels, output_channels=num_classes + 1)
-
+        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=input_channels,
+                                         output_channels=num_classes + 1)
         self.n_sample = 256
         self.pos_iou_thresh = 0.7
         self.neg_iou_thresh = 0.3
@@ -80,8 +81,9 @@ class PointNetv1(nn.Module):
 
 
 class PointSeg(nn.Module):
-    def __init__(self, num_classes=3, input_channels=4):
+    def __init__(self, model_cfg, num_classes=3, input_channels=4):
         super(PointSeg, self).__init__()
+        self.model_cfg = model_cfg
 
         self.dconv1 = nn.Conv1d(1088 + num_classes, 512, 1)
         self.dconv2 = nn.Conv1d(512, 256, 1)
@@ -93,7 +95,8 @@ class PointSeg(nn.Module):
         self.dbn2 = nn.BatchNorm1d(256)
         self.dbn3 = nn.BatchNorm1d(128)
         self.dbn4 = nn.BatchNorm1d(128)
-        self.cls_layers = self.make_fc_layers(input_channels=input_channels, output_channels=num_classes + 1)
+        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=input_channels,
+                                         output_channels=num_classes + 1)
 
     def forward(self, data_dict):  # bs,4,n
         bs = data_dict['cls_pred'].size()[0]
@@ -276,8 +279,7 @@ class BoxRegNet(nn.Module):
                                  torch.norm(corners_3d_pred - corners_3d_gt_flip, dim=-1))
         corners_loss = self.huber_loss(corners_dist, delta=1.0)
 
-        loss = center_loss + head_cls_loss + size_cls_loss + \
-               head_res_norm_loss * 20 + size_res_norm_loss * 20 \
+        loss = center_loss + head_cls_loss + size_cls_loss + (head_res_norm_loss + size_res_norm_loss) * 20 \
                + corner_loss_weight * corners_loss
         return loss
 
@@ -288,8 +290,8 @@ class PointNetDetector(nn.Module):
         self.model_cfg = model_cfg
         self.n_classes = n_classes
         self.dataset = dataset
-        self.PointCls = PointNetv1(n_classes, n_channels)
-        self.PointSeg = PointSeg(n_classes, n_channels)
+        self.PointCls = PointNetv1([256, 256], n_classes, n_channels)
+        self.PointSeg = PointSeg([256, 256], n_classes, n_channels)
         self.CenterReg = CenterRegNet(n_classes=3)
         self.BoxReg = BoxRegNet(n_classes=3)
         self.NUM_OBJECT_POINT = 512
@@ -384,7 +386,6 @@ class PointNetDetector(nn.Module):
             return pred_dicts, recall_dicts
 
     def assign_targets(self, batch_dict, proposals, rois):
-
         '''
         :return:
             batch_target['cls_label']: assigned targets for classification of proposals
@@ -640,15 +641,18 @@ class PointNetDetector(nn.Module):
 
     @torch.no_grad()
     def generate_proposals(self, batch_dict):
-        dx, dy, dz = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes']
+        [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
         batch_proposal_poses = []
         batch_proposal_points = []
         batch_frame_ids = []
-        for index, data in enumerate(batch_dict):
+        batch_size = batch_dict['batch_size']
+        pc_size = int(batch_dict['points'].shape[0]/batch_size)
+        for index in range(batch_size):
+            pts = batch_dict['points'][index * pc_size:(index+1) * pc_size]
             poses = []
-            for pt in data['points']:
+            for pt in pts:
                 pos = []
-                xc, yc, zc = pt
+                xc, yc, zc = pt[:3]
                 pos.append([xc, yc, zc, dx, dy, dz])
                 pos.append([xc + dx / 4, yc, zc, dx, dy, dz])
                 pos.append([xc - dx / 4, yc, zc, dx, dy, dz])
@@ -661,15 +665,18 @@ class PointNetDetector(nn.Module):
                 pos_horizon = [[*pr, 0] for pr in pos]
                 pos_vertica = [[*pr, np.pi / 2] for pr in pos]
                 poses.append(pos_horizon + pos_vertica)
+
             frame_ids = []
             indices = []
+            poses = np.array(poses).reshape(-1, 7).astype(float)
+            print(poses.shape, type(poses), type(batch_dict['points']))
             corners3d = boxes_to_corners_3d(poses)
             for k in range(len(poses)):
-                flag = in_hull(data['points'][:, 0:3], corners3d[k])
-                indice = [i for i, x in enumerate(flag) if x == 1]
-                indices.extend(indice)
-                frame_ids.append(data['frame_id'])
-            points = data['points'][indices]
+                flag = in_hull(pts[:, 0:3], corners3d[k])
+                idx = [i for i, x in enumerate(flag) if x == 1]
+                indices.extend(idx)
+                frame_ids.append(batch_dict['frame_id'][index])
+            points = pts[indices]
 
             batch_proposal_poses.append(*poses)
             batch_proposal_points.append(*points)
