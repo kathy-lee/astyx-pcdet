@@ -650,7 +650,6 @@ class PointNetDetector(nn.Module):
         batch_frame_id = []
         for index in range(batch_size):
             pts = batch_dict['points'][index * pc_size:(index+1) * pc_size]
-            poses = []
             for pt in pts:
                 pos = []
                 xc, yc, zc = pt[:3]
@@ -665,16 +664,15 @@ class PointNetDetector(nn.Module):
                 pos.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
                 pos_horizon = [[*pr, 0] for pr in pos]
                 pos_vertica = [[*pr, np.pi / 2] for pr in pos]
-                poses.append(pos_horizon + pos_vertica)
-
-            poses = np.array(poses).reshape(-1, 7).astype(float)
-            corners3d = boxes_to_corners_3d(poses)
-            for k in range(len(poses)):
-                flag = in_hull(pts[:, 0:3].cpu(), corners3d[k])
-                idx = [i for i, x in enumerate(flag) if x == 1]
-                batch_proposal_pts.append(pts[idx])
-                batch_frame_id.append(batch_dict['frame_id'][index])
-                batch_proposal_pose.append(poses[k])
+                poses = pos_vertica + pos_horizon
+                poses = np.array(poses).reshape(-1, 7).astype(float)
+                corners3d = boxes_to_corners_3d(poses)
+                for k in range(len(poses)):
+                    flag = in_hull(pts[:, 0:3].cpu(), corners3d[k])
+                    idx = [i for i, x in enumerate(flag) if x == 1]
+                    batch_proposal_pts.append(pts[idx])
+                    batch_frame_id.append(batch_dict['frame_id'][index])
+                    batch_proposal_pose.append(poses[k])
 
         proposals = {'frame_id': batch_frame_id, 'pos': batch_proposal_pose, 'pts': batch_proposal_pts}
         return proposals
