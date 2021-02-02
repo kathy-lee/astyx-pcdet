@@ -642,11 +642,12 @@ class PointNetDetector(nn.Module):
     @torch.no_grad()
     def generate_proposals(self, batch_dict):
         [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
-        batch_proposal_poses = []
-        batch_proposal_points = []
-        batch_frame_ids = []
         batch_size = batch_dict['batch_size']
-        pc_size = int(batch_dict['points'].shape[0]/batch_size)
+        pc_size = int(batch_dict['points'].shape[0] / batch_size)
+
+        batch_proposal_pose = []
+        batch_proposal_pts = []
+        batch_frame_id = []
         for index in range(batch_size):
             pts = batch_dict['points'][index * pc_size:(index+1) * pc_size]
             poses = []
@@ -666,23 +667,16 @@ class PointNetDetector(nn.Module):
                 pos_vertica = [[*pr, np.pi / 2] for pr in pos]
                 poses.append(pos_horizon + pos_vertica)
 
-            frame_ids = []
-            indices = []
             poses = np.array(poses).reshape(-1, 7).astype(float)
-            print(poses.shape, type(poses), type(batch_dict['points']))
             corners3d = boxes_to_corners_3d(poses)
             for k in range(len(poses)):
-                flag = in_hull(pts[:, 0:3], corners3d[k])
+                flag = in_hull(pts[:, 0:3].cpu(), corners3d[k])
                 idx = [i for i, x in enumerate(flag) if x == 1]
-                indices.extend(idx)
-                frame_ids.append(batch_dict['frame_id'][index])
-            points = pts[indices]
+                batch_proposal_pts.append(pts[idx])
+                batch_frame_id.append(batch_dict['frame_id'][index])
+                batch_proposal_pose.append(poses[k])
 
-            batch_proposal_poses.append(*poses)
-            batch_proposal_points.append(*points)
-            batch_frame_ids.append(*frame_ids)
-
-        proposals = {'frame_id': batch_frame_ids, 'pos': batch_proposal_poses, 'pts': batch_proposal_points}
+        proposals = {'frame_id': batch_frame_id, 'pos': batch_proposal_pose, 'pts': batch_proposal_pts}
         return proposals
 
     @torch.no_grad()
