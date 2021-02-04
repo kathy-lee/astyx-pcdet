@@ -7,7 +7,6 @@ from pcdet.models.model_utils.model_nms_utils import class_agnostic_nms
 from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
 from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
-
 NUM_HEADING_BIN = 12
 NUM_SIZE_CLUSTER = 8  # one cluster for each type
 
@@ -64,7 +63,7 @@ class PointNetv1(nn.Module):
         softmax = nn.Softmax(dim=1)
         cls_score = softmax(logits)
         cls_pred = torch.max(cls_score, 1)
-        one_hot_vec = torch.zeros(bs, self.num_class, n_pts)
+        one_hot_vec = torch.zeros(bs, self.num_class)
         one_hot_vec[cls_pred] = 1
 
         feature_dict = {
@@ -163,7 +162,7 @@ class CenterRegNet(nn.Module):
 
         center_new = data_dict['center'] + x
         pts_new = data_dict['pts'] - x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['pts'].shape[-1])
-        data_dict.update({'center': center_new})   # (32,3)
+        data_dict.update({'center': center_new})  # (32,3)
         data_dict.update({'pts': pts_new})
         return x
 
@@ -297,16 +296,16 @@ class PointNetDetector(nn.Module):
         self.NUM_OBJECT_POINT = 512
 
         self.g_type2class = {'Car': 0, 'Van': 1, 'Truck': 2, 'Pedestrian': 3,
-                        'Person_sitting': 4, 'Cyclist': 5, 'Tram': 6, 'Misc': 7}
+                             'Person_sitting': 4, 'Cyclist': 5, 'Tram': 6, 'Misc': 7}
         g_class2type = {self.g_type2class[t]: t for t in self.g_type2class}
         self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
-                            'Van': np.array([5.06763659, 1.9007158, 2.20532825]),
-                            'Truck': np.array([10.13586957, 2.58549199, 3.2520595]),
-                            'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
-                            'Person_sitting': np.array([0.80057803, 0.5983815, 1.27450867]),
-                            'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127]),
-                            'Tram': np.array([16.17150617, 2.53246914, 3.53079012]),
-                            'Misc': np.array([3.64300781, 1.54298177, 1.92320313])}
+                                 'Van': np.array([5.06763659, 1.9007158, 2.20532825]),
+                                 'Truck': np.array([10.13586957, 2.58549199, 3.2520595]),
+                                 'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
+                                 'Person_sitting': np.array([0.80057803, 0.5983815, 1.27450867]),
+                                 'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127]),
+                                 'Tram': np.array([16.17150617, 2.53246914, 3.53079012]),
+                                 'Misc': np.array([3.64300781, 1.54298177, 1.92320313])}
         self.g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3))  # size clustrs
         for i in range(NUM_SIZE_CLUSTER):
             self.g_mean_size_arr[i, :] = self.g_type_mean_size[g_class2type[i]]
@@ -344,7 +343,7 @@ class PointNetDetector(nn.Module):
         # center = box_pred[:, :3] + stage1_center  # bs,3
 
         # rewrite forward
-        proposals = self.generate_proposals(batch_dict) # proposals{'pts', 'frame_id', 'pos'}
+        proposals = self.generate_proposals(batch_dict, self.model_cfg)  # proposals{'pts', 'frame_id', 'pos'}
         feature_dict = self.PointCls(proposals['pts'])
         rois = self.get_rois(proposals, feature_dict) # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
         rois = self.PointSeg(rois) # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
@@ -640,40 +639,40 @@ class PointNetDetector(nn.Module):
         return torch.mean(losses)
 
     @torch.no_grad()
-    def generate_proposals(self, batch_dict):
+    def generate_proposals(self, batch_dict, model_cfg):
         [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
         batch_size = batch_dict['batch_size']
         pc_size = int(batch_dict['points'].shape[0] / batch_size)
-
         batch_proposal_pose = []
         batch_proposal_pts = []
         batch_frame_id = []
         for index in range(batch_size):
-            pts = batch_dict['points'][index * pc_size:(index+1) * pc_size]
+            pts = batch_dict['points'][index * pc_size:(index + 1) * pc_size]
             for pt in pts:
-                pos = []
-                xc, yc, zc = pt[:3]
-                pos.append([xc, yc, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc, zc, dx, dy, dz])
-                pos.append([xc, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc, yc - dy / 4, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc + dx / 4, yc - dy / 4, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc + dy / 4, zc, dx, dy, dz])
-                pos.append([xc - dx / 4, yc - dy / 4, zc, dx, dy, dz])
-                pos_horizon = [[*pr, 0] for pr in pos]
-                pos_vertica = [[*pr, np.pi / 2] for pr in pos]
-                poses = pos_vertica + pos_horizon
-                poses = np.array(poses).reshape(-1, 7).astype(float)
+                xc, yc, zc = pt[1:4]
+                centers_xy = np.array([
+                    [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc + dy / 4],
+                    [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
+                    [xc - dx / 4, yc - dy / 4],
+                    [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
+                    [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
+                    [xc - dy / 4, yc - dx / 4]
+                ])
+                poses = np.zeros((18, 7))
+                poses[:, :2] = centers_xy
+                poses[:, 2:6] = [zc, dx, dy, dz]
+                poses[9:, -1] = np.pi/2
                 corners3d = boxes_to_corners_3d(poses)
                 for k in range(len(poses)):
-                    flag = in_hull(pts[:, 0:3].cpu(), corners3d[k])
+                    flag = in_hull(pts[:, 1:4].cpu(), corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
-                    batch_proposal_pts.append(pts[idx])
+                    # print(idx)
+                    idx_sample = np.random.choice(idx, 128, replace=True)
+                    batch_proposal_pts.append(pts[idx_sample])
                     batch_frame_id.append(batch_dict['frame_id'][index])
                     batch_proposal_pose.append(poses[k])
 
+        # print(batch_frame_id[0], batch_proposal_pts[0].shape, batch_proposal_pose[0])
         proposals = {'frame_id': batch_frame_id, 'pos': batch_proposal_pose, 'pts': batch_proposal_pts}
         return proposals
 
