@@ -644,7 +644,7 @@ class PointNetDetector(nn.Module):
         batch_size = batch_dict['batch_size']
         pc_size = int(batch_dict['points'].shape[0] / batch_size)
         batch_proposal_pose = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 7))
-        batch_proposal_pts = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 128, 6))
+        batch_proposal_pts = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 128, 4))
         batch_frame_id = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0])).long()
         for m in range(batch_size):
             pts = batch_dict['points'][m * pc_size:(m + 1) * pc_size]
@@ -668,10 +668,11 @@ class PointNetDetector(nn.Module):
                     flag = in_hull(pts[:, 1:4].cpu(), corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
                     idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
-                    batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample]
+                    batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample, 1:5]
                     batch_proposal_pose[m*pc_size + n*18 + k, :] = poses[k]
                     batch_frame_id[m*pc_size + n*18 + k] = int(batch_dict['frame_id'][m])
 
+        batch_proposal_pts = batch_proposal_pts.permute(0, 2, 1).contiguous()
         proposals = {
             'frame_id': batch_frame_id,
             'pos': batch_proposal_pose,
