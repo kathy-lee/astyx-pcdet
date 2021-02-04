@@ -666,14 +666,16 @@ class PointNetDetector(nn.Module):
                 for k in range(len(poses)):
                     flag = in_hull(pts[:, 1:4].cpu(), corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
-                    # print(idx)
-                    idx_sample = np.random.choice(idx, 128, replace=True)
+                    idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
                     batch_proposal_pts.append(pts[idx_sample])
                     batch_frame_id.append(batch_dict['frame_id'][index])
                     batch_proposal_pose.append(poses[k])
 
-        # print(batch_frame_id[0], batch_proposal_pts[0].shape, batch_proposal_pose[0])
-        proposals = {'frame_id': batch_frame_id, 'pos': batch_proposal_pose, 'pts': batch_proposal_pts}
+        proposals = {
+            'frame_id': np.array(batch_frame_id),
+            'pos': np.array(batch_proposal_pose),
+            'pts': np.array(batch_proposal_pts)
+        }
         return proposals
 
     @torch.no_grad()
