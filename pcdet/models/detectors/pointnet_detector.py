@@ -345,11 +345,11 @@ class PointNetDetector(nn.Module):
         # rewrite forward
         proposals = self.generate_proposals(batch_dict, self.model_cfg)  # proposals{'pts', 'frame_id', 'pos'}
         feature_dict = self.PointCls(proposals['pts'])
-        rois = self.get_rois(proposals, feature_dict) # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
-        rois = self.PointSeg(rois) # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
-        rois = self.point_cloud_masking(rois) # add rois{'center'}
-        rois = self.CenterReg(rois) # update rois{'center'} and {'pts'}
-        rois = self.BoxReg(rois) # update rois{'center'}, add rois{ 'box_reg_pred' }, move old center in rois{'center_last'}
+        rois = self.get_rois(proposals, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
+        rois = self.point_cloud_masking(rois)  # add rois{'center'}
+        rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
+        rois = self.BoxReg(rois)  # update rois{'center'}, add rois{ 'box_reg_pred' }, move old center in rois{'center_last'}
 
         # # rewrite forward
         # proposals = self.generate_proposals(batch_dict)
@@ -643,13 +643,13 @@ class PointNetDetector(nn.Module):
         [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
         batch_size = batch_dict['batch_size']
         pc_size = int(batch_dict['points'].shape[0] / batch_size)
-        batch_proposal_pose = []
-        batch_proposal_pts = []
-        batch_frame_id = []
-        for index in range(batch_size):
-            pts = batch_dict['points'][index * pc_size:(index + 1) * pc_size]
-            for pt in pts:
-                xc, yc, zc = pt[1:4]
+        batch_proposal_pose = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 7))
+        batch_proposal_pts = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 128, 6))
+        batch_frame_id = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0])).long()
+        for m in range(batch_size):
+            pts = batch_dict['points'][m * pc_size:(m + 1) * pc_size]
+            for n in range(pts.size()[0]):
+                xc, yc, zc = pts[n, 1:4]
                 centers_xy = np.array([
                     [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc + dy / 4],
                     [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
@@ -663,18 +663,19 @@ class PointNetDetector(nn.Module):
                 poses[:, 2:6] = [zc, dx, dy, dz]
                 poses[9:, -1] = np.pi/2
                 corners3d = boxes_to_corners_3d(poses)
+                poses = torch.from_numpy(poses)
                 for k in range(len(poses)):
                     flag = in_hull(pts[:, 1:4].cpu(), corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
                     idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
-                    batch_proposal_pts.append(pts[idx_sample])
-                    batch_frame_id.append(batch_dict['frame_id'][index])
-                    batch_proposal_pose.append(poses[k])
+                    batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample]
+                    batch_proposal_pose[m*pc_size + n*18 + k, :] = poses[k]
+                    batch_frame_id[m*pc_size + n*18 + k] = int(batch_dict['frame_id'][m])
 
         proposals = {
-            'frame_id': np.array(batch_frame_id),
-            'pos': np.array(batch_proposal_pose),
-            'pts': np.array(batch_proposal_pts)
+            'frame_id': batch_frame_id,
+            'pos': batch_proposal_pose,
+            'pts': batch_proposal_pts
         }
         return proposals
 
