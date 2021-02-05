@@ -651,7 +651,7 @@ class PointNetDetector(nn.Module):
             for n in range(pts.size()[0]):
                 xc, yc, zc = pts[n, 1:4]
                 centers_xy = torch.tensor([
-                    [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc + dy / 4],
+                    [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
                     [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
                     [xc - dx / 4, yc - dy / 4],
                     [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
