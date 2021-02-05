@@ -650,7 +650,7 @@ class PointNetDetector(nn.Module):
             pts = batch_dict['points'][m * pc_size:(m + 1) * pc_size]
             for n in range(pts.size()[0]):
                 xc, yc, zc = pts[n, 1:4]
-                centers_xy = np.array([
+                centers_xy = torch.tensor([
                     [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc + dy / 4],
                     [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
                     [xc - dx / 4, yc - dy / 4],
@@ -658,14 +658,14 @@ class PointNetDetector(nn.Module):
                     [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
                     [xc - dy / 4, yc - dx / 4]
                 ])
-                poses = np.zeros((18, 7))
+                poses = batch_dict['points'].new_zeros((18, 7))  #np.zeros((18, 7))
                 poses[:, :2] = centers_xy
-                poses[:, 2:6] = [zc, dx, dy, dz]
+                poses[:, 2:6] = torch.tensor([zc, dx, dy, dz])
                 poses[9:, -1] = np.pi/2
                 corners3d = boxes_to_corners_3d(poses)
-                poses = torch.from_numpy(poses)
+                #poses = torch.from_numpy(poses)
                 for k in range(len(poses)):
-                    flag = in_hull(pts[:, 1:4].cpu(), corners3d[k])
+                    flag = in_hull(pts[:, 1:4].cpu(), corners3d[k].cpu())
                     idx = [i for i, x in enumerate(flag) if x == 1]
                     idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
                     batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample, 1:5]
