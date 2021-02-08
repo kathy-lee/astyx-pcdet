@@ -21,10 +21,14 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             dataloader_iter = iter(train_loader)
             batch = next(dataloader_iter)
             print('new iters')
-        print('**********************')
+        print('**********************batch_dict info*********************')
         for key,value in batch.items():
             print(key)
-        print('**********************')
+            if key != 'batch_size':
+                print(value.shape)
+            # if key != 'points':
+            #     print(value)
+        print('**********************************************************')
         lr_scheduler.step(accumulated_iter)
 
         try:
