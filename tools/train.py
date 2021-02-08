@@ -106,7 +106,7 @@ def main():
     #######################################
     if cfg.MODEL.NAME == 'PointNetDetector':
         train_set, train_loader, train_sampler = build_proposal_dataloader(
-            anchor_cfg = cfg.MODEL_CONFIG.ANCHOR_GENERATOR_CONFIG,
+            anchor_cfg=cfg.MODEL.ANCHOR_GENERATOR_CONFIG,
             dataset_cfg=cfg.DATA_CONFIG,
             class_names=cfg.CLASS_NAMES,
             batch_size=args.batch_size,
