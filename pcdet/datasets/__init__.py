@@ -88,7 +88,8 @@ def build_proposal_dataloader(anchor_cfg, dataset_cfg, class_names, batch_size, 
         training=training,
         logger=logger,
     )
-    dataset = generate_proposals(anchor_cfg, pc_dataset)
+    # dataset = generate_proposals(anchor_cfg, pc_dataset)
+    dataset = Proposal(pc_dataset, anchor_cfg)
     if merge_all_iters_to_one_epoch:
         assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
         dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)
@@ -109,50 +110,147 @@ def build_proposal_dataloader(anchor_cfg, dataset_cfg, class_names, batch_size, 
 
     return dataset, dataloader, sampler
 
-def generate_proposals(anchor_cfg, dataset):
+# def generate_proposals(anchor_cfg, dataset):
+#
+#     [dx, dy, dz] = anchor_cfg[0]['anchor_sizes'][0]  # only car target
+#     dx *= 2
+#     dy *= 2
+#     n_pt = dataset[0]['points'].shape[0]
+#     n_pc = len(dataset)
+#     n_ac = 1  # 18
+#     batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
+#     batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, 128, 4])
+#     batch_frame_id = np.empty([n_ac * n_pt * n_pc], dtype=int)
+#     for m in range(n_pc):
+#         print(f'genreate proposals for %d th pc(frame id %s)' % (m, dataset[m]['frame_id']))
+#         pts = dataset[m]['points']
+#         for n in range(n_pt):
+#             xc, yc, zc = pts[n, 1:4]
+#             centers_xy = np.array([
+#                 [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
+#                 [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
+#                 [xc - dx / 4, yc - dy / 4],
+#                 [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
+#                 [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
+#                 [xc - dy / 4, yc - dx / 4]
+#             ])
+#             centers_xy = np.array([xc, yc])
+#             poses = np.zeros([n_ac, 7])
+#             poses[:, :2] = centers_xy
+#             poses[:, 2:6] = np.array([zc, dx, dy, dz])
+#             poses[9:, -1] = np.pi / 2
+#             corners3d = boxes_to_corners_3d(poses)
+#             for k in range(len(poses)):
+#                 flag = in_hull(pts[:, 1:4], corners3d[k])
+#                 idx = [i for i, x in enumerate(flag) if x == 1]
+#                 idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
+#                 batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
+#                 batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
+#                 batch_frame_id[m * n_pt + n * n_ac + k] = int(dataset[m]['frame_id'])
+#
+#     batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
+#     proposals = {
+#         'frame_id': batch_frame_id,
+#         'pos': batch_proposal_pose,
+#         'points': batch_proposal_pts
+#     }
+#     return proposals
 
-    [dx, dy, dz] = anchor_cfg[0]['anchor_sizes'][0]  # only car target
-    dx *= 2
-    dy *= 2
-    n_pt = dataset[0]['points'].shape[0]
-    n_pc = len(dataset)
-    n_ac = 1  # 18
-    batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
-    batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, 128, 4])
-    batch_frame_id = np.empty([n_ac * n_pt * n_pc], dtype=int)
-    for m in range(n_pc):
-        print(f'genreate proposals for %d th pc(frame id %s)' % (m, dataset[m]['frame_id']))
-        pts = dataset[m]['points']
-        for n in range(n_pt):
-            xc, yc, zc = pts[n, 1:4]
-            centers_xy = np.array([
-                [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
-                [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
-                [xc - dx / 4, yc - dy / 4],
-                [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
-                [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
-                [xc - dy / 4, yc - dx / 4]
-            ])
-            centers_xy = np.array([xc, yc])
-            poses = np.zeros([n_ac, 7])
-            poses[:, :2] = centers_xy
-            poses[:, 2:6] = np.array([zc, dx, dy, dz])
-            poses[9:, -1] = np.pi / 2
-            corners3d = boxes_to_corners_3d(poses)
-            for k in range(len(poses)):
-                flag = in_hull(pts[:, 1:4], corners3d[k])
-                idx = [i for i, x in enumerate(flag) if x == 1]
-                idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
-                batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
-                batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
-                batch_frame_id[m * n_pt + n * n_ac + k] = int(dataset[m]['frame_id'])
 
-    batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
-    proposals = {
-        'frame_id': batch_frame_id,
-        'pos': batch_proposal_pose,
-        'points': batch_proposal_pts
-    }
-    return proposals
+class Proposal(torch_data.Dataset):
+    def __init__(self, pcdata=None, anchor_cfg=None):
+        super().__init__()
+        self.pcdata = pcdata
+        self.anchor_cfg = anchor_cfg
+        self.proposalset = self.generate_proposal(pcdata, anchor_cfg)
 
+    def __getitem__(self, index):
 
+        return self.proposalset[index]
+
+    def __len__(self):
+
+        return len(self.proposalset)
+
+    @staticmethod
+    def collate_batch(batch_list, _unused=False):
+        data_dict = defaultdict(list)
+        for cur_sample in batch_list:
+            for key, val in cur_sample.items():
+                data_dict[key].append(val)
+        batch_size = len(batch_list)
+        ret = {}
+
+        for key, val in data_dict.items():
+            try:
+                if key in ['voxels', 'voxel_num_points']:
+                    ret[key] = np.concatenate(val, axis=0)
+                elif key in ['points', 'voxel_coords']:
+                    coors = []
+                    for i, coor in enumerate(val):
+                        coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
+                        coors.append(coor_pad)
+                    ret[key] = np.concatenate(coors, axis=0)
+                elif key in ['gt_boxes']:
+                    max_gt = max([len(x) for x in val])
+                    batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
+                    for k in range(batch_size):
+                        batch_gt_boxes3d[k, :val[k].__len__(), :] = val[k]
+                    ret[key] = batch_gt_boxes3d
+                else:
+                    ret[key] = np.stack(val, axis=0)
+            except:
+                print('Error in collate_batch: key=%s' % key)
+                raise TypeError
+
+        ret['batch_size'] = batch_size
+        return ret
+
+    def generate_proposal(self, dataset, anchor_cfg):
+        [dx, dy, dz] = anchor_cfg[0]['anchor_sizes'][0]  # only car target
+        dx *= 2
+        dy *= 2
+        n_pt = dataset[0]['points'].shape[0]
+        n_pc = len(dataset)
+        n_ac = 1  # 18
+        batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
+        batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, 128, 4])
+        batch_frame_id = np.empty([n_ac * n_pt * n_pc], dtype="<U10")
+        for m in range(4):  # n_pc
+            print(f'genreate proposals for %d th pc(frame id %s)' % (m, dataset[m]['frame_id']))
+            pts = dataset[m]['points']
+            for n in range(n_pt):
+                xc, yc, zc = pts[n, 1:4]
+                centers_xy = np.array([
+                    [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
+                    [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
+                    [xc - dx / 4, yc - dy / 4],
+                    [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
+                    [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
+                    [xc - dy / 4, yc - dx / 4]
+                ])
+                centers_xy = np.array([xc, yc])
+                poses = np.zeros([n_ac, 7])
+                poses[:, :2] = centers_xy
+                poses[:, 2:6] = np.array([zc, dx, dy, dz])
+                poses[9:, -1] = np.pi / 2
+                corners3d = boxes_to_corners_3d(poses)
+                for k in range(len(poses)):
+                    flag = in_hull(pts[:, 1:4], corners3d[k])
+                    idx = [i for i, x in enumerate(flag) if x == 1]
+                    idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
+                    batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
+                    batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
+                    batch_frame_id[m * n_pt + n * n_ac + k] = dataset[m]['frame_id']
+
+        batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
+        # proposals = {
+        #     'frame_id': batch_frame_id,
+        #     'pos': batch_proposal_pose,
+        #     'points': batch_proposal_pts
+        # }
+        proposals = [{'frame_id': batch_frame_id[i],
+                      'pos': batch_proposal_pose[i, :],
+                      'points': batch_proposal_pts[i, :, :]}
+                     for i in range(batch_frame_id.shape[0])]
+        return proposals
