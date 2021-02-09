@@ -26,10 +26,10 @@ def make_fc_layers(fc_list, input_channels, output_channels):
 
 
 class PointNetv1(nn.Module):
-    def __init__(self, model_cfg, num_classes=3, input_channels=4):
+    def __init__(self, model_cfg, num_class, input_channels=4):
         super(PointNetv1, self).__init__()
         self.model_cfg = model_cfg
-        self.num_classes = num_classes
+        self.num_class = num_class
 
         self.conv1 = nn.Conv1d(input_channels, 64, 1)
         self.conv2 = nn.Conv1d(64, 64, 1)
@@ -41,30 +41,27 @@ class PointNetv1(nn.Module):
         self.bn3 = nn.BatchNorm1d(64)
         self.bn4 = nn.BatchNorm1d(128)
         self.bn5 = nn.BatchNorm1d(1024)
-        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=input_channels,
-                                         output_channels=num_classes + 1)
+        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=1024, output_channels=self.num_class)
         self.n_sample = 256
         self.pos_iou_thresh = 0.7
         self.neg_iou_thresh = 0.3
         self.pos_ratio = 0.5
 
     def forward(self, batch_data):  # bs,4,n
-        bs = batch_data.size()[0]
-        n_pts = batch_data.size()[2]
-
+        print(batch_data.shape)
         out1 = F.relu(self.bn1(self.conv1(batch_data)))  # bs,64,n
         out2 = F.relu(self.bn2(self.conv2(out1)))  # bs,64,n
         out3 = F.relu(self.bn3(self.conv3(out2)))  # bs,64,n
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,128,n
         out5 = F.relu(self.bn5(self.conv5(out4)))  # bs,1024,n
         global_feat = torch.max(out5, 2, keepdim=True)[0]  # bs,1024,1
-        logits = self.cls_layers(global_feat)
-
+        print(global_feat.size())
+        logits = self.cls_layers(np.squeeze(global_feat, axis=2))
         softmax = nn.Softmax(dim=1)
         cls_score = softmax(logits)
-        cls_pred = torch.max(cls_score, 1)
-        one_hot_vec = torch.zeros(bs, self.num_class)
-        one_hot_vec[cls_pred] = 1
+        _, cls_pred = torch.max(cls_score, 1)
+        one_hot_vec = torch.zeros(batch_data.shape[0], self.num_class)
+        one_hot_vec[:, cls_pred] = 1
 
         feature_dict = {
             'local_feat': out2,
@@ -289,7 +286,7 @@ class PointNetDetector(nn.Module):
         self.model_cfg = model_cfg
         self.n_classes = n_classes
         self.dataset = dataset
-        self.PointCls = PointNetv1([256, 256], n_classes, n_channels)
+        self.PointCls = PointNetv1([256, 256], 2, n_channels)
         self.PointSeg = PointSeg([256, 256], n_classes, n_channels)
         self.CenterReg = CenterRegNet(n_classes=3)
         self.BoxReg = BoxRegNet(n_classes=3)
@@ -369,7 +366,7 @@ class PointNetDetector(nn.Module):
         rois = self.point_cloud_masking(rois)  # add rois{'center'}
         rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
         rois = self.BoxReg(rois)
-
+        print('Network forwarding finished.')
         if self.training:
             # batch_target = self.assign_targets(batch_dict, proposals, rois)
             batch_target = self.assign_targets2(batch_dict, rois)
