@@ -162,7 +162,7 @@ class Proposal(torch_data.Dataset):
         super().__init__()
         self.pcdata = pcdata
         self.anchor_cfg = anchor_cfg
-        self.proposalset = self.generate_proposal(pcdata, anchor_cfg)
+        self.proposalset = self.generate_proposal()
 
     def __getitem__(self, index):
 
@@ -206,19 +206,19 @@ class Proposal(torch_data.Dataset):
         ret['batch_size'] = batch_size
         return ret
 
-    def generate_proposal(self, dataset, anchor_cfg):
-        [dx, dy, dz] = anchor_cfg[0]['anchor_sizes'][0]  # only car target
+    def generate_proposal(self):
+        [dx, dy, dz] = self.anchor_cfg[0]['anchor_sizes'][0]  # only car target
         dx *= 2
         dy *= 2
-        n_pt = dataset[0]['points'].shape[0]
-        n_pc = len(dataset)
+        n_pt = self.pcdata[0]['points'].shape[0]
+        n_pc = len(self.pcdata)
         n_ac = 1  # 18
         batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
         batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, 128, 4])
         batch_frame_id = np.empty([n_ac * n_pt * n_pc], dtype="<U10")
         for m in range(4):  # n_pc
-            print(f'genreate proposals for %d th pc(frame id %s)' % (m, dataset[m]['frame_id']))
-            pts = dataset[m]['points']
+            print(f'genreate proposals for %d th pc(frame id %s)' % (m, self.pcdata[m]['frame_id']))
+            pts = self.pcdata[m]['points']
             for n in range(n_pt):
                 xc, yc, zc = pts[n, 1:4]
                 centers_xy = np.array([
@@ -241,7 +241,7 @@ class Proposal(torch_data.Dataset):
                     idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
                     batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
                     batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
-                    batch_frame_id[m * n_pt + n * n_ac + k] = dataset[m]['frame_id']
+                    batch_frame_id[m * n_pt + n * n_ac + k] = self.pcdata[m]['frame_id']
 
         batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
         # proposals = {
