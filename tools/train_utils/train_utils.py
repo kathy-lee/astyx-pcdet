@@ -22,9 +22,11 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             batch = next(dataloader_iter)
             print('new iters')
         print('**********************batch_dict info*********************')
-        for key,value in batch.items():
+        for key, value in batch.items():
             print(key)
-            if key != 'batch_size':
+            if key == 'batch_size' or key == 'frame_id':
+                print(value)
+            else:
                 print(value.shape)
             # if key != 'points':
             #     print(value)
@@ -41,10 +43,7 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
 
         model.train()
         optimizer.zero_grad()
-        print('**********************')
-        print('frame id during training')
-        print(batch['frame_id'])
-        print('**********************')
+
         loss, tb_dict, disp_dict = model_func(model, batch)
 
         loss.backward()
