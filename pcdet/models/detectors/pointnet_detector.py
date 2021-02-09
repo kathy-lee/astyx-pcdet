@@ -342,14 +342,14 @@ class PointNetDetector(nn.Module):
         # box_pred = self.BoxReg(pts_xyz_new)  # (32, 59)
         # center = box_pred[:, :3] + stage1_center  # bs,3
 
-        # rewrite forward
-        proposals = self.generate_proposals(batch_dict, self.model_cfg)  # proposals{'pts', 'frame_id', 'pos'}
-        feature_dict = self.PointCls(proposals['pts'])
-        rois = self.get_rois(proposals, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
-        rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
-        rois = self.point_cloud_masking(rois)  # add rois{'center'}
-        rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
-        rois = self.BoxReg(rois)  # update rois{'center'}, add rois{ 'box_reg_pred' }, move old center in rois{'center_last'}
+        # # rewrite forward
+        # proposals = self.generate_proposals(batch_dict, self.model_cfg)  # proposals{'pts', 'frame_id', 'pos'}
+        # feature_dict = self.PointCls(proposals['pts'])
+        # rois = self.get_rois(proposals, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        # rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
+        # rois = self.point_cloud_masking(rois)  # add rois{'center'}
+        # rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
+        # rois = self.BoxReg(rois)  # update rois{'center'}, add rois{ 'box_reg_pred' }, move old center in rois{'center_last'}
 
         # # rewrite forward
         # proposals = self.generate_proposals(batch_dict)
@@ -362,8 +362,17 @@ class PointNetDetector(nn.Module):
         # box_reg_pred = self.BoxReg(rois['pts'], cls_pred)
         # center_pred = center_mask + center_delta + box_reg_pred[:, :3]
 
+        # rewrite forward using proposal as batch data
+        feature_dict = self.PointCls(batch_dict['points'])
+        rois = self.get_rois(batch_dict, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
+        rois = self.point_cloud_masking(rois)  # add rois{'center'}
+        rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
+        rois = self.BoxReg(rois)
+
         if self.training:
-            batch_target = self.assign_targets(batch_dict, proposals, rois)
+            # batch_target = self.assign_targets(batch_dict, proposals, rois)
+            batch_target = self.assign_targets2(batch_dict, rois)
             seg_loss_weight = 1.0
             box_loss_weight = 1.0
             cls_loss = self.PointCls.get_loss(feature_dict['cls_logits'], batch_target['cls_label'])
@@ -383,6 +392,59 @@ class PointNetDetector(nn.Module):
         else:
             pred_dicts, recall_dicts = self.post_processing(batch_dict)
             return pred_dicts, recall_dicts
+
+    def assign_targets2(self, batch_dict, rois):
+        cls_label = self.assign_proposal_target2(batch_dict)
+        point_label = self.assign_seg_target(batch_dict, rois)
+
+        center_label = batch_dict['gt_boxes'][:3]
+        boxsize = batch_dict['gt_boxes'][3:6]
+        heading = batch_dict['gt_boxes'][-1]
+
+        size_class = 0
+        size_residual = boxsize - self.g_type_mean_size['Car']
+
+        angle = heading % (2 * np.pi)
+        assert (angle >= 0 and angle <= 2 * np.pi)
+        angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
+        shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+        heading_class = int(shifted_angle / angle_per_class)
+        heading_residual = shifted_angle - (heading_class * angle_per_class + angle_per_class / 2)
+
+        target_dict = {
+            'cls_label': cls_label,
+            'point_label': point_label,
+            'center_label': center_label,
+            'hclass': heading_class,
+            'hres': heading_residual,
+            'sclass': size_class,
+            'size': size_residual
+        }
+        return target_dict
+
+    def assign_proposal_target2(self, batch_data):
+
+        label = np.empty((len(batch_data),), dtype=np.int32)
+        label.fill(-1)
+        argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(batch_data,
+                                                                self.dataset.pcdata.astyx_info['annos']['gt_box'])
+        label[max_ious < self.neg_iou_thresh] = 0
+        label[gt_argmax_ious] = 1
+        label[max_ious >= self.pos_iou_thresh] = 1
+
+        n_pos = int(self.pos_ratio * self.n_sample)
+        pos_index = np.where(label == 1)[0]
+        if len(pos_index) > n_pos:
+            disable_index = np.random.choice(
+                pos_index, size=(len(pos_index) - n_pos), replace=False)
+            label[disable_index] = -1
+
+        n_neg = self.n_sample - np.sum(label == 1)
+        neg_index = np.where(label == 0)[0]
+        if len(neg_index) > n_neg:
+            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
+            label[disable_index] = -1
+        return label
 
     def assign_targets(self, batch_dict, proposals, rois):
         '''
