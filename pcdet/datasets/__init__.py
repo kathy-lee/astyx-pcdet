@@ -165,11 +165,9 @@ class Proposal(torch_data.Dataset):
         self.proposalset = self.generate_proposal()
 
     def __getitem__(self, index):
-
         return self.proposalset[index]
 
     def __len__(self):
-
         return len(self.proposalset)
 
     @staticmethod
@@ -186,11 +184,12 @@ class Proposal(torch_data.Dataset):
                 if key in ['voxels', 'voxel_num_points']:
                     ret[key] = np.concatenate(val, axis=0)
                 elif key in ['points', 'voxel_coords']:
-                    coors = []
-                    for i, coor in enumerate(val):
-                        coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
-                        coors.append(coor_pad)
-                    ret[key] = np.concatenate(coors, axis=0)
+                    # coors = []
+                    # for i, coor in enumerate(val):
+                    #     coor_pad = np.pad(coor, ((0, 0), (1, 0)), mode='constant', constant_values=i)
+                    #     coors.append(coor_pad)
+                    # ret[key] = np.concatenate(coors, axis=0)
+                    ret[key] = np.array(val)
                 elif key in ['gt_boxes']:
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
@@ -249,6 +248,7 @@ class Proposal(torch_data.Dataset):
         #     'pos': batch_proposal_pose,
         #     'points': batch_proposal_pts
         # }
+        print(batch_frame_id.shape, batch_proposal_pts.shape, batch_proposal_pose.shape)
         proposals = [{'frame_id': batch_frame_id[i],
                       'pos': batch_proposal_pose[i, :],
                       'points': batch_proposal_pts[i, :, :]}
