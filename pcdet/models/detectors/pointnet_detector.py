@@ -697,56 +697,70 @@ class PointNetDetector(nn.Module):
         losses = 0.5 * quadratic ** 2 + delta * linear
         return torch.mean(losses)
 
-    @torch.no_grad()
-    def generate_proposals(self, batch_dict, model_cfg):
-        [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
-        batch_size = batch_dict['batch_size']
-        pc_size = int(batch_dict['points'].shape[0] / batch_size)
-        batch_proposal_pose = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 7))
-        batch_proposal_pts = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 128, 4))
-        batch_frame_id = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0])).long()
-        for m in range(batch_size):
-            pts = batch_dict['points'][m * pc_size:(m + 1) * pc_size]
-            for n in range(pts.size()[0]):
-                xc, yc, zc = pts[n, 1:4]
-                centers_xy = torch.tensor([
-                    [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
-                    [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
-                    [xc - dx / 4, yc - dy / 4],
-                    [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
-                    [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
-                    [xc - dy / 4, yc - dx / 4]
-                ])
-                poses = batch_dict['points'].new_zeros((18, 7))  #np.zeros((18, 7))
-                poses[:, :2] = centers_xy
-                poses[:, 2:6] = torch.tensor([zc, dx, dy, dz])
-                poses[9:, -1] = np.pi/2
-                corners3d = boxes_to_corners_3d(poses)
-                #poses = torch.from_numpy(poses)
-                for k in range(len(poses)):
-                    flag = in_hull(pts[:, 1:4].cpu(), corners3d[k].cpu())
-                    idx = [i for i, x in enumerate(flag) if x == 1]
-                    idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
-                    batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample, 1:5]
-                    batch_proposal_pose[m*pc_size + n*18 + k, :] = poses[k]
-                    batch_frame_id[m*pc_size + n*18 + k] = int(batch_dict['frame_id'][m])
-
-        batch_proposal_pts = batch_proposal_pts.permute(0, 2, 1).contiguous()
-        proposals = {
-            'frame_id': batch_frame_id,
-            'pos': batch_proposal_pose,
-            'pts': batch_proposal_pts
-        }
-        return proposals
+    # @torch.no_grad()
+    # def generate_proposals(self, batch_dict, model_cfg):
+    #     [dx, dy, dz] = self.model_cfg.ANCHOR_GENERATOR_CONFIG[0]['anchor_sizes'][0]  # only car target
+    #     batch_size = batch_dict['batch_size']
+    #     pc_size = int(batch_dict['points'].shape[0] / batch_size)
+    #     batch_proposal_pose = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 7))
+    #     batch_proposal_pts = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0], 128, 4))
+    #     batch_frame_id = batch_dict['points'].new_zeros((18*batch_dict['points'].shape[0])).long()
+    #     for m in range(batch_size):
+    #         pts = batch_dict['points'][m * pc_size:(m + 1) * pc_size]
+    #         for n in range(pts.size()[0]):
+    #             xc, yc, zc = pts[n, 1:4]
+    #             centers_xy = torch.tensor([
+    #                 [xc, yc], [xc + dx / 4, yc], [xc - dx / 4, yc], [xc, yc + dy / 4], [xc, yc - dy / 4],
+    #                 [xc + dx / 4, yc + dy / 4], [xc + dx / 4, yc - dy / 4], [xc - dx / 4, yc + dy / 4],
+    #                 [xc - dx / 4, yc - dy / 4],
+    #                 [xc, yc], [xc + dy / 4, yc], [xc - dy / 4, yc], [xc, yc + dx / 4], [xc, yc + dx / 4],
+    #                 [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
+    #                 [xc - dy / 4, yc - dx / 4]
+    #             ])
+    #             poses = batch_dict['points'].new_zeros((18, 7))  #np.zeros((18, 7))
+    #             poses[:, :2] = centers_xy
+    #             poses[:, 2:6] = torch.tensor([zc, dx, dy, dz])
+    #             poses[9:, -1] = np.pi/2
+    #             corners3d = boxes_to_corners_3d(poses)
+    #             #poses = torch.from_numpy(poses)
+    #             for k in range(len(poses)):
+    #                 flag = in_hull(pts[:, 1:4].cpu(), corners3d[k].cpu())
+    #                 idx = [i for i, x in enumerate(flag) if x == 1]
+    #                 idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
+    #                 batch_proposal_pts[m*pc_size + n*18 + k, :, :] = pts[idx_sample, 1:5]
+    #                 batch_proposal_pose[m*pc_size + n*18 + k, :] = poses[k]
+    #                 batch_frame_id[m*pc_size + n*18 + k] = int(batch_dict['frame_id'][m])
+    #
+    #     batch_proposal_pts = batch_proposal_pts.permute(0, 2, 1).contiguous()
+    #     proposals = {
+    #         'frame_id': batch_frame_id,
+    #         'pos': batch_proposal_pose,
+    #         'pts': batch_proposal_pts
+    #     }
+    #     return proposals
 
     @torch.no_grad()
     def get_rois(self, proposals, features, n_pre_nms=10000, n_post_nms=2000):
-        rois = [dict(item, **{'feature': features[index]}) for index, item in enumerate(proposals)]
-        order = proposals['cls_pred'].ravel().argsort()[::-1]
-        order = order[:n_pre_nms]
-        rois = rois[order, :]
-        keep = class_agnostic_nms(rois)
-        keep = keep[:n_post_nms]
-        rois = rois[keep]
-        return rois
 
+        proposals.update(features)
+        print(proposals['cls_pred'])
+        indices = [index for index, value in enumerate(proposals['cls_pred'][:, 1]) if value == 1]
+        print(indices)
+        rois = {}
+        for key, value in proposals.items():
+            if key == 'batch_size':
+                pass
+            else:
+                rois[key] = value[indices]
+        rois.update({'batch_size': len(indices)})
+        print(f'get number of ROIs: %d' % rois['batch_size'])
+
+        # rois = [dict(item, **{'feature': features[index]}) for index, item in enumerate(proposals)]
+        # order = proposals['cls_pred'].ravel().argsort()[::-1]
+        # order = order[:n_pre_nms]
+        # rois = rois[order, :]
+        # keep = class_agnostic_nms(rois)
+        # keep = keep[:n_post_nms]
+        # rois = rois[keep]
+
+        return rois
