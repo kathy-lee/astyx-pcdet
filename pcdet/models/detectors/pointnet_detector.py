@@ -26,10 +26,10 @@ def make_fc_layers(fc_list, input_channels, output_channels):
 
 
 class PointNetv1(nn.Module):
-    def __init__(self, model_cfg, num_class, input_channels=4):
+    def __init__(self, model_cfg, num_classes, input_channels=4):
         super(PointNetv1, self).__init__()
         self.model_cfg = model_cfg
-        self.num_class = num_class
+        self.num_classes = num_classes
 
         self.conv1 = nn.Conv1d(input_channels, 64, 1)
         self.conv2 = nn.Conv1d(64, 64, 1)
@@ -41,7 +41,7 @@ class PointNetv1(nn.Module):
         self.bn3 = nn.BatchNorm1d(64)
         self.bn4 = nn.BatchNorm1d(128)
         self.bn5 = nn.BatchNorm1d(1024)
-        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=1024, output_channels=self.num_class)
+        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=1024, output_channels=self.num_classes)
         self.n_sample = 256
         self.pos_iou_thresh = 0.7
         self.neg_iou_thresh = 0.3
@@ -60,7 +60,7 @@ class PointNetv1(nn.Module):
         softmax = nn.Softmax(dim=1)
         cls_score = softmax(logits)
         _, cls_pred = torch.max(cls_score, 1)
-        one_hot_vec = torch.zeros(batch_data.shape[0], self.num_class)
+        one_hot_vec = torch.zeros(batch_data.shape[0], self.num_classes)
         one_hot_vec[:, cls_pred] = 1
 
         feature_dict = {
@@ -77,11 +77,12 @@ class PointNetv1(nn.Module):
 
 
 class PointSeg(nn.Module):
-    def __init__(self, model_cfg, num_classes=3, input_channels=4):
+    def __init__(self, model_cfg, num_classes, input_channels=4):
         super(PointSeg, self).__init__()
         self.model_cfg = model_cfg
+        self.num_classes = num_classes
 
-        self.dconv1 = nn.Conv1d(1088 + num_classes, 512, 1)
+        self.dconv1 = nn.Conv1d(1088 + self.num_classes, 512, 1)
         self.dconv2 = nn.Conv1d(512, 256, 1)
         self.dconv3 = nn.Conv1d(256, 128, 1)
         self.dconv4 = nn.Conv1d(128, 128, 1)
@@ -92,13 +93,15 @@ class PointSeg(nn.Module):
         self.dbn3 = nn.BatchNorm1d(128)
         self.dbn4 = nn.BatchNorm1d(128)
         self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=input_channels,
-                                         output_channels=num_classes + 1)
+                                         output_channels=self.num_classes + 1)
 
     def forward(self, data_dict):  # bs,4,n
-        bs = data_dict['cls_pred'].size()[0]
-        n_pts = data_dict['cls_pred'].size()[2]
-
-        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1, 1)  # bs,3,1
+        bs = data_dict['batch_size']
+        n_pts = data_dict['points'].size()[2]
+        # print(data_dict['cls_pred'].size(), data_dict['cls_pred'].is_cuda)
+        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1, 1).cuda()  # bs,3,1
+        # print(data_dict['global_feat'].size(), data_dict['global_feat'].is_cuda)
+        # print(expand_one_hot_vec.size(), expand_one_hot_vec.is_cuda)
         expand_global_feat = torch.cat([data_dict['global_feat'], expand_one_hot_vec], 1)  # bs,1027,1
         expand_global_feat_repeat = expand_global_feat.view(bs, -1, 1).repeat(1, 1, n_pts)  # bs,1027,n
         concat_feat = torch.cat([data_dict['local_feat'], expand_global_feat_repeat], 1)
@@ -112,6 +115,8 @@ class PointSeg(nn.Module):
         x = self.dconv5(x)  # bs, 2, n
 
         seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
+        print('point segment prediction: ')
+        print(seg_pred.size())
         data_dict.update({'seg_logits': seg_pred})
         data_dict.pop('global_feat')
         data_dict.pop('local_feat')
@@ -128,11 +133,13 @@ class CenterRegNet(nn.Module):
     def __init__(self, n_classes=3):
         super(CenterRegNet, self).__init__()
 
-        self.conv1 = torch.nn.Conv1d(3, 128, 1)
+        self.n_classes = n_classes
+
+        self.conv1 = torch.nn.Conv1d(4, 128, 1)
         self.conv2 = torch.nn.Conv1d(128, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 256, 1)
         # self.conv4 = torch.nn.Conv1d(256, 512, 1)
-        self.fc1 = nn.Linear(256 + n_classes, 256)
+        self.fc1 = nn.Linear(256 + self.n_classes, 256)
         self.fc2 = nn.Linear(256, 128)
         self.fc3 = nn.Linear(128, 3)
 
@@ -146,22 +153,27 @@ class CenterRegNet(nn.Module):
         self.fcbn2 = nn.BatchNorm1d(128)
 
     def forward(self, data_dict):
-        bs = data_dict['pts'].size()[0]
-        x = F.relu(self.bn1(self.conv1(data_dict['pts'])))  # bs,128,n
+        bs = data_dict['batch_size']
+        print(data_dict['points'].size())
+        x = F.relu(self.bn1(self.conv1(data_dict['points'])))  # bs,128,n
         x = F.relu(self.bn2(self.conv2(x)))  # bs,128,n
         x = F.relu(self.bn3(self.conv3(x)))  # bs,256,n
         x = torch.max(x, 2)[0]  # bs,256
-        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1)  # bs,3
+        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1).cuda()  # bs,3
         x = torch.cat([x, expand_one_hot_vec], 1)  # bs,259
         x = F.relu(self.fcbn1(self.fc1(x)))  # bs,256
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,128
         x = self.fc3(x)  # bs,
+        print(x.size())
+
+        pts_new = data_dict['points']
+        pts_new[:, :3, :] -= x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['points'].shape[-1])
 
         center_new = data_dict['center'] + x
-        pts_new = data_dict['pts'] - x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['pts'].shape[-1])
         data_dict.update({'center': center_new})  # (32,3)
-        data_dict.update({'pts': pts_new})
-        return x
+        data_dict.update({'points': pts_new})
+        print(f'after center reg: %d' % bs)
+        return data_dict
 
     def get_loss(self, center_pred, center_label):
         center_dist = torch.norm(center_pred - center_label, dim=1)  # (32,)
@@ -170,12 +182,12 @@ class CenterRegNet(nn.Module):
 
 
 class BoxRegNet(nn.Module):
-    def __init__(self, n_classes=3):
+    def __init__(self, n_classes=2):
         """Amodal 3D Box Estimation Pointnet
         :param n_classes:3
         """
         super(BoxRegNet, self).__init__()
-        self.conv1 = nn.Conv1d(3, 128, 1)
+        self.conv1 = nn.Conv1d(4, 128, 1)
         self.conv2 = nn.Conv1d(128, 128, 1)
         self.conv3 = nn.Conv1d(128, 256, 1)
         self.conv4 = nn.Conv1d(256, 512, 1)
@@ -186,7 +198,7 @@ class BoxRegNet(nn.Module):
 
         self.n_classes = n_classes
 
-        self.fc1 = nn.Linear(512 + n_classes, 512)
+        self.fc1 = nn.Linear(512 + self.n_classes, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, 3 + NUM_HEADING_BIN * 2 + NUM_SIZE_CLUSTER * 4)
         self.fcbn1 = nn.BatchNorm1d(512)
@@ -201,17 +213,19 @@ class BoxRegNet(nn.Module):
             including box centers, heading bin class scores and residuals,
             and size cluster scores and residuals
         """
-        bs = data_dict['pts'].size()[0]
+        bs = data_dict['batch_size']
 
-        out1 = F.relu(self.bn1(self.conv1(data_dict['pts'])))  # bs,128,n
+        out1 = F.relu(self.bn1(self.conv1(data_dict['points'])))  # bs,128,n
         out2 = F.relu(self.bn2(self.conv2(out1)))  # bs,128,n
         out3 = F.relu(self.bn3(self.conv3(out2)))  # bs,256,n
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,512,n
         global_feat = torch.max(out4, 2, keepdim=False)[0]  # bs,512
 
-        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1)  # bs,3
+        expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1).cuda()  # bs,3
+        print(global_feat.size(), expand_one_hot_vec.size())  # torch.Size([2, 512]) torch.Size([2, 2])
         expand_global_feat = torch.cat([global_feat, expand_one_hot_vec], 1)  # bs,515
-
+        print(expand_global_feat.size())
+        x = self.fc1(expand_global_feat)
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,256
         box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
@@ -287,7 +301,7 @@ class PointNetDetector(nn.Module):
         self.n_classes = n_classes
         self.dataset = dataset
         self.PointCls = PointNetv1([256, 256], 2, n_channels)
-        self.PointSeg = PointSeg([256, 256], n_classes, n_channels)
+        self.PointSeg = PointSeg([256, 256], 2, n_channels)
         self.CenterReg = CenterRegNet(n_classes=3)
         self.BoxReg = BoxRegNet(n_classes=3)
         self.NUM_OBJECT_POINT = 512
@@ -424,7 +438,7 @@ class PointNetDetector(nn.Module):
         label = np.empty((len(batch_data),), dtype=np.int32)
         label.fill(-1)
         argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(batch_data,
-                                                                self.dataset.pcdata.astyx_info['annos']['gt_box'])
+                                                                self.dataset.pcdata.astyx_infos['annos']['gt_box'])
         label[max_ious < self.neg_iou_thresh] = 0
         label[gt_argmax_ious] = 1
         label[max_ious >= self.pos_iou_thresh] = 1
@@ -542,7 +556,7 @@ class PointNetDetector(nn.Module):
         :param xyz_only: bool
         :return:
         '''
-        pts = data_dict['pts']
+        pts = data_dict['points']
         logits = data_dict['seg_logits']
         bs = pts.shape[0]
         n_pts = pts.shape[2]
@@ -745,6 +759,7 @@ class PointNetDetector(nn.Module):
         proposals.update(features)
         print(proposals['cls_pred'])
         indices = [index for index, value in enumerate(proposals['cls_pred'][:, 1]) if value == 1]
+        indices = [0, 1]
         print(indices)
         rois = {}
         for key, value in proposals.items():
