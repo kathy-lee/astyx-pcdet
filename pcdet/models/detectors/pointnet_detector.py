@@ -403,7 +403,7 @@ class PointNetDetector(nn.Module):
             return pred_dicts, recall_dicts
 
     def assign_targets2(self, batch_dict, rois):
-        cls_label = self.assign_proposal_target2(batch_dict)
+        cls_label = self.assign_proposal_target2(batch_dict['pos'])
         point_label = self.assign_seg_target(batch_dict, rois)
 
         center_label = batch_dict['gt_boxes'][:3]
@@ -436,7 +436,7 @@ class PointNetDetector(nn.Module):
         label = np.empty((len(batch_data),), dtype=np.int32)
         label.fill(-1)
         argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(batch_data,
-                                                                self.dataset.pcdata.astyx_infos['annos']['gt_box'])
+                                                                self.dataset.pcdata.astyx_infos[0]['annos']['gt_boxes'])
         label[max_ious < self.neg_iou_thresh] = 0
         label[gt_argmax_ious] = 1
         label[max_ious >= self.pos_iou_thresh] = 1
@@ -519,12 +519,14 @@ class PointNetDetector(nn.Module):
         return label
 
     def _calc_ious(self, anchor, bbox):
+
+        bbox = torch.from_numpy(bbox).float().cuda()
         ious = boxes_iou3d_gpu(anchor, bbox)  # (N,K)
         argmax_ious = ious.argmax(axis=1)
         max_ious = ious[:, argmax_ious]  # [1,N]
         gt_argmax_ious = ious.argmax(axis=0)
         gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
-        gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # K
+        gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
         return argmax_ious, max_ious, gt_argmax_ious
 
     def assign_seg_target(self, batch_data, anchor):
