@@ -41,7 +41,7 @@ class PointNetv1(nn.Module):
         self.bn3 = nn.BatchNorm1d(64)
         self.bn4 = nn.BatchNorm1d(128)
         self.bn5 = nn.BatchNorm1d(1024)
-        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=1024, output_channels=self.num_classes)
+        self.cls_layers = make_fc_layers(fc_list=model_cfg, input_channels=1024, output_channels=num_classes)
         self.n_sample = 256
         self.pos_iou_thresh = 0.7
         self.neg_iou_thresh = 0.3
@@ -66,7 +66,7 @@ class PointNetv1(nn.Module):
         feature_dict = {
             'local_feat': out2,
             'global_feat': global_feat,
-            'cls_pred': one_hot_vec,
+            'cls_pred': one_hot_vec[:, 0:3],
             'cls_logits': logits
         }
         return feature_dict
@@ -82,7 +82,7 @@ class PointSeg(nn.Module):
         self.model_cfg = model_cfg
         self.num_classes = num_classes
 
-        self.dconv1 = nn.Conv1d(1088 + self.num_classes, 512, 1)
+        self.dconv1 = nn.Conv1d(1088 + num_classes, 512, 1)
         self.dconv2 = nn.Conv1d(512, 256, 1)
         self.dconv3 = nn.Conv1d(256, 128, 1)
         self.dconv4 = nn.Conv1d(128, 128, 1)
@@ -92,8 +92,6 @@ class PointSeg(nn.Module):
         self.dbn2 = nn.BatchNorm1d(256)
         self.dbn3 = nn.BatchNorm1d(128)
         self.dbn4 = nn.BatchNorm1d(128)
-        self.cls_layers = make_fc_layers(fc_list=self.model_cfg, input_channels=input_channels,
-                                         output_channels=self.num_classes + 1)
 
     def forward(self, data_dict):  # bs,4,n
         bs = data_dict['batch_size']
@@ -182,11 +180,13 @@ class CenterRegNet(nn.Module):
 
 
 class BoxRegNet(nn.Module):
-    def __init__(self, n_classes=2):
+    def __init__(self, n_classes=3):
         """Amodal 3D Box Estimation Pointnet
         :param n_classes:3
         """
         super(BoxRegNet, self).__init__()
+        self.n_classes = n_classes
+
         self.conv1 = nn.Conv1d(4, 128, 1)
         self.conv2 = nn.Conv1d(128, 128, 1)
         self.conv3 = nn.Conv1d(128, 256, 1)
@@ -196,9 +196,7 @@ class BoxRegNet(nn.Module):
         self.bn3 = nn.BatchNorm1d(256)
         self.bn4 = nn.BatchNorm1d(512)
 
-        self.n_classes = n_classes
-
-        self.fc1 = nn.Linear(512 + self.n_classes, 512)
+        self.fc1 = nn.Linear(512 + n_classes, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, 3 + NUM_HEADING_BIN * 2 + NUM_SIZE_CLUSTER * 4)
         self.fcbn1 = nn.BatchNorm1d(512)
@@ -300,10 +298,10 @@ class PointNetDetector(nn.Module):
         self.model_cfg = model_cfg
         self.n_classes = n_classes
         self.dataset = dataset
-        self.PointCls = PointNetv1([256, 256], 2, n_channels)
-        self.PointSeg = PointSeg([256, 256], 2, n_channels)
-        self.CenterReg = CenterRegNet(n_classes=3)
-        self.BoxReg = BoxRegNet(n_classes=3)
+        self.PointCls = PointNetv1([256, 256], n_classes+1, n_channels)
+        self.PointSeg = PointSeg([256, 256], n_classes, n_channels)
+        self.CenterReg = CenterRegNet(n_classes=n_classes)
+        self.BoxReg = BoxRegNet(n_classes=n_classes)
         self.NUM_OBJECT_POINT = 512
 
         self.g_type2class = {'Car': 0, 'Van': 1, 'Truck': 2, 'Pedestrian': 3,
@@ -317,7 +315,7 @@ class PointNetDetector(nn.Module):
                                  'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127]),
                                  'Tram': np.array([16.17150617, 2.53246914, 3.53079012]),
                                  'Misc': np.array([3.64300781, 1.54298177, 1.92320313])}
-        self.g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3))  # size clustrs
+        self.g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3))  # size clusters
         for i in range(NUM_SIZE_CLUSTER):
             self.g_mean_size_arr[i, :] = self.g_type_mean_size[g_class2type[i]]
 
