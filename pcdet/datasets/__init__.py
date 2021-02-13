@@ -172,13 +172,16 @@ class Proposal(torch_data.Dataset):
 
     @staticmethod
     def collate_batch(batch_list, _unused=False):
+        print(len(batch_list))
+        print(batch_list[0]['frame_id'])
+        print(batch_list[0]['gt_boxes'])
+        print(batch_list[0]['points'].shape)
         data_dict = defaultdict(list)
         for cur_sample in batch_list:
             for key, val in cur_sample.items():
                 data_dict[key].append(val)
         batch_size = len(batch_list)
         ret = {}
-
         for key, val in data_dict.items():
             try:
                 if key in ['voxels', 'voxel_num_points']:
@@ -191,6 +194,9 @@ class Proposal(torch_data.Dataset):
                     # ret[key] = np.concatenate(coors, axis=0)
                     ret[key] = np.array(val)
                 elif key in ['gt_boxes']:
+                    # print('gt_boxes:%d' % len(val))
+                    # for i in range(len(val)):
+                    #     print(type(val[i]))
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
                     for k in range(batch_size):
@@ -209,15 +215,20 @@ class Proposal(torch_data.Dataset):
         [dx, dy, dz] = self.anchor_cfg[0]['anchor_sizes'][0]  # only car target
         dx *= 2
         dy *= 2
-        n_pt = self.pcdata[0]['points'].shape[0]
+        n_pt = 1024  # read from data_cfg
         n_pc = len(self.pcdata)
         n_ac = 1  # 18
+        n_pt_proposal = 129
         batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
-        batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, 128, 4])
-        batch_frame_id = np.empty([n_ac * n_pt * n_pc], dtype="<U10")
+        batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, n_pt_proposal, 4])
+        batch_frame_id = [None]*n_ac * n_pt * n_pc
+        batch_gt_boxes = [None]*n_ac * n_pt * n_pc
         for m in range(4):  # n_pc
-            print(f'genreate proposals for %d th pc(frame id %s)' % (m, self.pcdata[m]['frame_id']))
-            pts = self.pcdata[m]['points']
+            pc_info = self.pcdata[m]
+            pts = pc_info['points']
+            gt_boxes = pc_info['gt_boxes']
+            frame_id = pc_info['frame_id']
+            print(f'genreate proposals for %d th pc(frame id %s)' % (m, frame_id))
             for n in range(n_pt):
                 xc, yc, zc = pts[n, 1:4]
                 centers_xy = np.array([
@@ -237,20 +248,21 @@ class Proposal(torch_data.Dataset):
                 for k in range(len(poses)):
                     flag = in_hull(pts[:, 1:4], corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
-                    idx_sample = np.random.choice(idx, 128, replace=True)  # move to model_cfg later
+                    idx_sample = np.random.choice(idx, n_pt_proposal, replace=True)  # move to model_cfg later
                     batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
                     batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
-                    batch_frame_id[m * n_pt + n * n_ac + k] = self.pcdata[m]['frame_id']
-
+                    batch_frame_id[m * n_pt + n * n_ac + k] = frame_id
+                    batch_gt_boxes[m * n_pt + n * n_ac + k] = gt_boxes
         batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
         # proposals = {
         #     'frame_id': batch_frame_id,
         #     'pos': batch_proposal_pose,
         #     'points': batch_proposal_pts
         # }
-        print(batch_frame_id.shape, batch_proposal_pts.shape, batch_proposal_pose.shape)
+        print(len(batch_frame_id), batch_proposal_pts.shape, batch_proposal_pose.shape, len(batch_gt_boxes))
         proposals = [{'frame_id': batch_frame_id[i],
                       'pos': batch_proposal_pose[i, :],
-                      'points': batch_proposal_pts[i, :, :]}
-                     for i in range(batch_frame_id.shape[0])]
+                      'points': batch_proposal_pts[i, :, :],
+                      'gt_boxes': batch_gt_boxes[i]}
+                     for i in range(len(batch_frame_id))]
         return proposals
