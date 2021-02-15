@@ -303,21 +303,19 @@ class PointNetDetector(nn.Module):
         self.CenterReg = CenterRegNet(n_classes=n_classes)
         self.BoxReg = BoxRegNet(n_classes=n_classes)
         self.NUM_OBJECT_POINT = 512
+        self.NUM_SIZE_CLUSTER = 3
 
-        self.g_type2class = {'Car': 0, 'Van': 1, 'Truck': 2, 'Pedestrian': 3,
-                             'Person_sitting': 4, 'Cyclist': 5, 'Tram': 6, 'Misc': 7}
-        g_class2type = {self.g_type2class[t]: t for t in self.g_type2class}
-        self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
-                                 'Van': np.array([5.06763659, 1.9007158, 2.20532825]),
-                                 'Truck': np.array([10.13586957, 2.58549199, 3.2520595]),
-                                 'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
-                                 'Person_sitting': np.array([0.80057803, 0.5983815, 1.27450867]),
-                                 'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127]),
-                                 'Tram': np.array([16.17150617, 2.53246914, 3.53079012]),
-                                 'Misc': np.array([3.64300781, 1.54298177, 1.92320313])}
-        self.g_mean_size_arr = np.zeros((NUM_SIZE_CLUSTER, 3))  # size clusters
-        for i in range(NUM_SIZE_CLUSTER):
-            self.g_mean_size_arr[i, :] = self.g_type_mean_size[g_class2type[i]]
+        # self.g_type2class = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
+        # g_class2type = {self.g_type2class[t]: t for t in self.g_type2class}
+        # self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
+        #                          'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
+        #                          'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127])}
+        self.g_type_mean_size = [[3.88311640418, 1.62856739989, 1.52563191462],
+                                 [0.84422524, 0.66068622, 1.76255119],
+                                 [1.76282397, 0.59706367, 1.73698127]]
+        # self.g_mean_size_arr = np.zeros((self.NUM_SIZE_CLUSTER, 3))  # size clusters
+        # for i in range(self.NUM_SIZE_CLUSTER):
+        #     self.g_mean_size_arr[i, :] = self.g_type_mean_size[i]
 
     def forward(self, batch_dict):  # bs,4,n
 
@@ -424,10 +422,10 @@ class PointNetDetector(nn.Module):
             'cls_label': cls_label,
             'point_label': point_label,
             'center_label': center_label,
-            'hclass': heading_class,
-            'hres': heading_residual,
-            'sclass': size_class,
-            'size': size_residual
+            'head_cls': heading_cls_label,
+            'head_res': heading_residual,
+            'size_cls': size_cls_label,
+            'size_res': size_residual
         }
         return target_dict
 
@@ -536,7 +534,7 @@ class PointNetDetector(nn.Module):
         gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
         return max_ious, gt_argmax_ious
 
-    def assign_seg_target(self, batch_data, anchor):
+    def assign_seg_target(self, batch_data):
         batch_size = batch_data['batch_size']
         points = batch_data['points'][:, :3, :].swapaxes(2, 1)
         n_pts = points.shape[1]
