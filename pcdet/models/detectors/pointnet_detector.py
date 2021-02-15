@@ -233,7 +233,7 @@ class BoxRegNet(nn.Module):
         data_dict.update({'center_last': center})
         data_dict.update({'center': center + center_delta})
         data_dict.update({'box_reg_pred': box_pred})
-        return box_pred
+        return data_dict
 
     def get_loss(self, center, batch_target, box_pred, corner_loss_weight=10.0):
         bs = box_pred.shape[0]
@@ -310,9 +310,9 @@ class PointNetDetector(nn.Module):
         # self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
         #                          'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
         #                          'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127])}
-        self.g_type_mean_size = [[3.88311640418, 1.62856739989, 1.52563191462],
-                                 [0.84422524, 0.66068622, 1.76255119],
-                                 [1.76282397, 0.59706367, 1.73698127]]
+        self.g_type_mean_size = np.array([[3.88311640418, 1.62856739989, 1.52563191462],
+                                          [0.84422524, 0.66068622, 1.76255119],
+                                          [1.76282397, 0.59706367, 1.73698127]])
         # self.g_mean_size_arr = np.zeros((self.NUM_SIZE_CLUSTER, 3))  # size clusters
         # for i in range(self.NUM_SIZE_CLUSTER):
         #     self.g_mean_size_arr[i, :] = self.g_type_mean_size[i]
@@ -402,21 +402,81 @@ class PointNetDetector(nn.Module):
 
     def assign_targets2(self, batch_dict, rois):
         cls_label = self.assign_proposal_target2(batch_dict)
-        point_label = self.assign_seg_target(batch_dict, rois)
+        point_label = self.assign_seg_target(rois)
+        print('assign target:')
+        print(cls_label.shape, point_label.shape)
 
-        center_label = batch_dict['gt_boxes'][:3]
-        boxsize = batch_dict['gt_boxes'][3:6]
-        heading = batch_dict['gt_boxes'][6]
+        center_label = torch.zeros((rois['batch_size'], 3))
+        size_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
+        size_residual = torch.zeros((rois['batch_size'], 3))
+        heading_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
+        heading_residual = torch.zeros((rois['batch_size'], 3))
+        for i in range(rois['batch_size']):
+            # rois[i] with best matched gt box [k]
+            k = 0
+            center_label[i, :] = rois['gt_boxes'][i, k, :3]
+            box_size = rois['gt_boxes'][i, k, 3:6]
+            heading = rois['gt_boxes'][i, k, 6]
+            size_cls_label[i] = rois['gt_boxes'][i, k, -1]
+            size_residual[i, :] = box_size - self.g_type_mean_size[size_cls_label[i], :]
+            angle = heading % (2 * np.pi)
+            assert (angle >= 0 and angle <= 2 * np.pi)
+            angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
+            shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+            heading_cls_label[i] = int(shifted_angle / angle_per_class)
+            heading_residual[i, :] = shifted_angle - (heading_cls_label * angle_per_class + angle_per_class / 2)
 
-        size_class = 0
-        size_residual = boxsize - self.g_type_mean_size['Car']
+        # center_label = rois['pos'][:, :3]
+        # box_size = rois['pos'][:, 3:6]
+        # heading = rois['pos'][6]
+        #
+        # center_label = batch_dict['gt_boxes'][:, :, :3]
+        # box_size = batch_dict['gt_boxes'][:, :, 3:6]
+        # heading = batch_dict['gt_boxes'][:, :, 6]  # bs,n_boxes
 
-        angle = heading % (2 * np.pi)
-        assert (angle >= 0 and angle <= 2 * np.pi)
-        angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
-        shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
-        heading_class = int(shifted_angle / angle_per_class)
-        heading_residual = shifted_angle - (heading_class * angle_per_class + angle_per_class / 2)
+        # size_class = np.argmax(batch_dict['cls_pred'], axis=1)  # 0/1/2
+        # size_residual = box_size - self.g_type_mean_size[size_class]
+
+        # angle = heading % (2 * np.pi)
+        # assert (angle >= 0 and angle <= 2 * np.pi)
+        # angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
+        # shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+        # heading_class = int(shifted_angle / angle_per_class)
+        # heading_residual = shifted_angle - (heading_class * angle_per_class + angle_per_class / 2)
+
+        # size_class, size_residual = size2class(self.size_list[index], self.type_list[index])
+        # def size2class(size, type_name):
+        #     ''' Convert 3D bounding box size to template class and residuals.
+        #         todo (rqi): support multiple size clusters per type.
+        #         Input:
+        #             size: numpy array of shape (3,) for (l,w,h)
+        #             type_name: string
+        #         Output:
+        #             size_class: int scalar
+        #             size_residual: numpy array of shape (3,)
+        #         '''
+        #     size_class = g_type2class[type_name]
+        #     size_residual = size - g_type_mean_size[type_name]
+
+        # angle_class, angle_residual = angle2class(heading_angle, NUM_HEADING_BIN)
+        # def angle2class(angle, num_class):
+        #     ''' Convert continuous angle to discrete class and residual.
+        #     Input:
+        #         angle: rad scalar, from 0-2pi (or -pi~pi), class center at
+        #             0, 1*(2pi/N), 2*(2pi/N) ...  (N-1)*(2pi/N)
+        #         num_class: int scalar, number of classes N
+        #     Output:
+        #         class_id, int, among 0,1,...,N-1
+        #         residual_angle: float, a number such that
+        #             class*(2pi/N) + residual_angle = angle
+        #     '''
+        #     angle = angle % (2 * np.pi)
+        #     assert (angle >= 0 and angle <= 2 * np.pi)
+        #     angle_per_class = 2 * np.pi / float(num_class)
+        #     shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+        #     class_id = int(shifted_angle / angle_per_class)
+        #     residual_angle = shifted_angle - (class_id * angle_per_class + angle_per_class / 2)
+        #     return class_id, residual_angle
 
         target_dict = {
             'cls_label': cls_label,
@@ -766,7 +826,6 @@ class PointNetDetector(nn.Module):
     def get_rois(self, proposals, features, n_pre_nms=10000, n_post_nms=2000):
 
         proposals.update(features)
-        print(proposals['cls_pred'])
         indices = [index for index, value in enumerate(proposals['cls_pred'][:, 1]) if value == 1]
         indices = [0, 1]
         print(indices)
