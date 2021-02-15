@@ -408,7 +408,7 @@ class PointNetDetector(nn.Module):
 
         center_label = batch_dict['gt_boxes'][:3]
         boxsize = batch_dict['gt_boxes'][3:6]
-        heading = batch_dict['gt_boxes'][-1]
+        heading = batch_dict['gt_boxes'][6]
 
         size_class = 0
         size_residual = boxsize - self.g_type_mean_size['Car']
@@ -433,13 +433,22 @@ class PointNetDetector(nn.Module):
 
     def assign_proposal_target2(self, batch_data, n_sample=2, pos_iou_thresh=0.7, neg_iou_thresh=0.3, pos_ratio=0.5):
         poses = batch_data['pos']
-        gt_boxes = batch_data['gt_boxes']
+        gt_boxes = batch_data['gt_boxes'][:, :, :7]
+        print('assign proposal target:')
+        print(poses.shape, gt_boxes.shape)
         label = -torch.ones([len(poses)], dtype=torch.int32)
-        max_ious, gt_argmax_ious = self._calc_ious(poses, gt_boxes)
-        print(max_ious.size())
-        label[max_ious < neg_iou_thresh] = 0
-        label[gt_argmax_ious] = 1
-        label[max_ious >= pos_iou_thresh] = 1
+        # max_ious, gt_argmax_ious = self._calc_ious(poses, gt_boxes)
+        # label[max_ious < neg_iou_thresh] = 0
+        # label[gt_argmax_ious] = 1
+        # label[max_ious >= pos_iou_thresh] = 1
+        for i in range(len(poses)):
+            pos = torch.unsqueeze(poses[i], 0)
+            # pos = poses[i][np.newaxis, :]
+            max_ious, gt_argmax_ious = self._calc_ious(pos, gt_boxes[i])
+            if max_ious >= pos_iou_thresh:
+                label[i] = 1
+            elif max_ious < neg_iou_thresh:
+                label[i] = 0
 
         n_pos = int(pos_ratio * n_sample)
         pos_index = np.where(label == 1)[0]
@@ -518,7 +527,7 @@ class PointNetDetector(nn.Module):
         return label
 
     def _calc_ious(self, anchor, bbox):
-        bbox = torch.from_numpy(bbox).float().cuda()
+        #bbox = torch.from_numpy(bbox).float().cuda()
         ious = boxes_iou3d_gpu(anchor, bbox)  # (N,K)
         argmax_ious = ious.argmax(axis=1)
         max_ious = ious[np.arange(anchor.size()[0]), argmax_ious]  # [1,N]
@@ -529,22 +538,26 @@ class PointNetDetector(nn.Module):
 
     def assign_seg_target(self, batch_data, anchor):
         batch_size = batch_data['batch_size']
-        points = batch_data['points']
-        bs_idx = points[:, 0]
+        points = batch_data['points'][:, :3, :].swapaxes(2, 1)
+        n_pts = points.shape[1]
+        #bs_idx = points[:, 0]
         gt_boxes = batch_data['gt_boxes']
-        point_cls_labels = points.new_zeros(points.shape[0]).long()
+        #point_cls_labels = points.new_zeros(points.shape[0]).long()
+        point_cls_labels = points.new_zeros(batch_size * n_pts).long()
         for k in range(batch_size):
-            bs_mask = (bs_idx == k)
-            points_single = points[bs_mask][:, 1:4]
-            point_cls_labels_single = point_cls_labels.new_zeros(bs_mask.sum())
+            # bs_mask = (bs_idx == k)
+            # points_single = points[bs_mask][:, 1:4]
+            # point_cls_labels_single = point_cls_labels.new_zeros(bs_mask.sum())
+            points_single = points[k, :, :]
+            point_cls_labels_single = point_cls_labels.new_zeros(n_pts).long()
             box_idxs_of_pts = roiaware_pool3d_utils.points_in_boxes_gpu(
                 points_single.unsqueeze(dim=0), gt_boxes[k:k + 1, :, 0:7].contiguous()
             ).long().squeeze(dim=0)
             box_fg_flag = (box_idxs_of_pts >= 0)
             fg_flag = box_fg_flag
             gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
-            point_cls_labels_single[fg_flag] = 1 if self.num_class == 1 else gt_box_of_fg_points[:, -1].long()
-            point_cls_labels[bs_mask] = point_cls_labels_single
+            point_cls_labels_single[fg_flag] = 1 if self.n_classes == 1 else gt_box_of_fg_points[:, -1].long()
+            point_cls_labels[k*n_pts : (k+1)*n_pts] = point_cls_labels_single
         return point_cls_labels
 
     def point_cloud_masking(self, data_dict, xyz_only=True):
