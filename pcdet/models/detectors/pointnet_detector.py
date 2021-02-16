@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from pcdet.utils.box_utils import in_hull, boxes_to_corners_3d
-from pcdet.models.model_utils.model_nms_utils import class_agnostic_nms
+
 from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
 from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
@@ -423,6 +422,7 @@ class PointNetDetector(nn.Module):
         # self.g_mean_size_arr = np.zeros((self.NUM_SIZE_CLUSTER, 3))  # size clusters
         # for i in range(self.NUM_SIZE_CLUSTER):
         #     self.g_mean_size_arr[i, :] = self.g_type_mean_size[i]
+        self.register_buffer('global_step', torch.LongTensor(1).zero_())
 
     def forward(self, batch_dict):  # bs,4,n
 
@@ -649,7 +649,7 @@ class PointNetDetector(nn.Module):
         '''
         cls_label = self.assign_proposal_target(batch_dict, proposals)
 
-        point_label = self.assign_seg_target(batch_dict, rois)
+        point_label = self.assign_seg_target(rois)
 
         center_label = batch_dict['gt_boxes'][:3]
         boxsize = batch_dict['gt_boxes'][3:6]
@@ -863,3 +863,6 @@ class PointNetDetector(nn.Module):
         # rois = rois[keep]
 
         return rois
+
+    def update_global_step(self):
+        self.global_step += 1
