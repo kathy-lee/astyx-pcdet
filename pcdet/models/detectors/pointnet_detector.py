@@ -310,7 +310,7 @@ class PointNetDetector(nn.Module):
         # self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
         #                          'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
         #                          'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127])}
-        self.g_type_mean_size = np.array([[3.88311640418, 1.62856739989, 1.52563191462],
+        self.g_type_mean_size = torch.tensor([[3.88311640418, 1.62856739989, 1.52563191462],
                                           [0.84422524, 0.66068622, 1.76255119],
                                           [1.76282397, 0.59706367, 1.73698127]])
         # self.g_mean_size_arr = np.zeros((self.NUM_SIZE_CLUSTER, 3))  # size clusters
@@ -411,18 +411,20 @@ class PointNetDetector(nn.Module):
         size_residual = torch.zeros((rois['batch_size'], 3))
         heading_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
         heading_residual = torch.zeros((rois['batch_size']))
+        g_type_size = self.g_type_mean_size.cuda()
+        torch.pi = torch.acos(torch.zeros(1)).item() * 2
         for i in range(rois['batch_size']):
             # rois[i] with best matched gt box [k]
             k = 0
             center_label[i, :] = rois['gt_boxes'][i, k, :3]
-            box_size = rois['gt_boxes'][i, k, 3:6].cpu()
-            heading = rois['gt_boxes'][i, k, 6].cpu()
+            box_size = rois['gt_boxes'][i, k, 3:6]
+            heading = rois['gt_boxes'][i, k, 6]
             size_cls_label[i] = rois['gt_boxes'][i, k, -1]
-            size_residual[i, :] = box_size - self.g_type_mean_size[size_cls_label[i], :]
-            angle = heading % (2 * np.pi)
-            assert (angle >= 0 and angle <= 2 * np.pi)
-            angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
-            shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+            size_residual[i, :] = box_size - g_type_size[size_cls_label[i], :]
+            angle = heading % (2 * torch.pi)
+            assert (angle >= 0 and angle <= 2 * torch.pi)
+            angle_per_class = 2 * torch.pi / float(NUM_HEADING_BIN)
+            shifted_angle = (angle + angle_per_class / 2) % (2 * torch.pi)
             heading_cls_label[i] = int(shifted_angle / angle_per_class)
             heading_residual[i] = shifted_angle - (heading_cls_label[i] * angle_per_class + angle_per_class / 2)
 
@@ -479,13 +481,13 @@ class PointNetDetector(nn.Module):
         #     return class_id, residual_angle
 
         target_dict = {
-            'cls_label': cls_label,
-            'point_label': point_label,
-            'center_label': center_label,
-            'head_cls': heading_cls_label,
-            'head_res': heading_residual,
-            'size_cls': size_cls_label,
-            'size_res': size_residual
+            'cls_label': cls_label.cuda(),
+            'point_label': point_label.cuda(),
+            'center_label': center_label.cuda(),
+            'head_cls': heading_cls_label.cuda(),
+            'head_res': heading_residual.cuda(),
+            'size_cls': size_cls_label.cuda(),
+            'size_res': size_residual.cuda()
         }
         return target_dict
 
