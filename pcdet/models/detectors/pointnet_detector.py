@@ -208,6 +208,10 @@ class BoxRegNet(nn.Module):
         self.fcbn1 = nn.BatchNorm1d(512)
         self.fcbn2 = nn.BatchNorm1d(256)
 
+        self.g_type_mean_size = torch.tensor([[3.88311640418, 1.62856739989, 1.52563191462],
+                                              [0.84422524, 0.66068622, 1.76255119],
+                                              [1.76282397, 0.59706367, 1.73698127]])
+
     def forward(self, data_dict):  # bs,3,m
         """
         :param
@@ -238,7 +242,7 @@ class BoxRegNet(nn.Module):
         center = data_dict['center']
         data_dict.update({'center_last': center})
         data_dict.update({'center': center + center_delta})
-        data_dict.update({'box_reg_pred': box_pred})
+        data_dict.update({'box_reg': box_pred})
         return data_dict
 
     def huber_loss(self, error, delta=1.0):  # (32,), ()
@@ -272,18 +276,19 @@ class BoxRegNet(nn.Module):
         head_res_norm_loss = self.huber_loss(head_res_norm_dist - head_res_norm_label, delta=1.0)
 
         # Size loss
+        g_type_size = self.g_type_mean_size.cuda()
         size_cls_loss = F.nll_loss(F.log_softmax(size_scores, dim=1), size_cls_label.long())  # tensor(2.0240, grad_fn=<NllLossBackward>)
         scls_onehot = torch.eye(NUM_SIZE_CLUSTER)[size_cls_label.long()].cuda()  # 32,8
         scls_onehot_repeat = scls_onehot.view(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 1, 3)  # 32,8,3
         predicted_size_residual_normalized_dist = torch.sum(size_res_norm * scls_onehot_repeat.cuda(), dim=1)  # 32,3
-        mean_size_arr_expand = torch.from_numpy(self.g_mean_size_arr).float().cuda().view(1, NUM_SIZE_CLUSTER, 3)#1,8,3
+        mean_size_arr_expand = g_type_size.view(1, NUM_SIZE_CLUSTER, 3)#1,8,3
         mean_size_label = torch.sum(scls_onehot_repeat * mean_size_arr_expand, dim=1)  # 32,3
         size_res_label_norm = size_res_label / mean_size_label.cuda()
         size_normalized_dist = torch.norm(size_res_label_norm - predicted_size_residual_normalized_dist, dim=1)  # 32
         size_res_norm_loss = self.huber_loss(size_normalized_dist, delta=1.0)  # tensor(11.2784, grad_fn=<MeanBackward0>)
 
         # Corner Loss
-        corners_3d = self.get_box3d_corners(center, head_res, size_res, self.g_mean_size_arr).cuda()  # (bs,NH,NS,8,3)(32, 12, 8, 8, 3)
+        corners_3d = self.get_box3d_corners(center, head_res, size_res).cuda()  # (bs,NH,NS,8,3)(32, 12, 8, 8, 3)
         gt_mask = hcls_onehot.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER) * \
                   scls_onehot.view(bs, 1, NUM_SIZE_CLUSTER).repeat(1, NUM_HEADING_BIN, 1)  # (bs,NH=12,NS=8)
         corners_3d_pred = torch.sum(gt_mask.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1, 1) \
@@ -291,7 +296,7 @@ class BoxRegNet(nn.Module):
         heading_bin_centers = torch.from_numpy(np.arange(0, 2 * np.pi, 2 * np.pi / NUM_HEADING_BIN)).float().cuda()  # (NH,)
         heading_label = head_res_label.view(bs, 1) + heading_bin_centers.view(1,NUM_HEADING_BIN)  # (bs,1)+(1,NH)=(bs,NH)
         heading_label = torch.sum(hcls_onehot.float() * heading_label, 1)
-        mean_sizes = torch.from_numpy(self.g_mean_size_arr).float().view(1, NUM_SIZE_CLUSTER, 3).cuda()  # (1,NS,3)
+        mean_sizes = g_type_size.view(1, NUM_SIZE_CLUSTER, 3) # (1,NS,3)
         size_label = mean_sizes + size_res_label.view(bs, 1, 3)  # (1,NS,3)+(bs,1,3)=(bs,NS,3)
         size_label = torch.sum(scls_onehot.view(bs, NUM_SIZE_CLUSTER, 1).float() * size_label, axis=[1])  # (B,3)
         corners_3d_gt = self.get_box3d_corners_helper(center_label, heading_label, size_label)  # (B,8,3)
@@ -333,10 +338,65 @@ class BoxRegNet(nn.Module):
         c += NUM_SIZE_CLUSTER
         size_residuals_normalized = box_pred[:, c:c + 3 * NUM_SIZE_CLUSTER].contiguous()  # [32,24] 3+2*12+8 : 3+2*12+4*8
         size_residuals_normalized = size_residuals_normalized.view(bs, NUM_SIZE_CLUSTER, 3)  # [32,8,3]
-        size_residuals = size_residuals_normalized * \
-                         torch.from_numpy(self.g_mean_size_arr).unsqueeze(0).repeat(bs, 1, 1).cuda()
+        g_type_size = self.g_type_mean_size.cuda()
+        size_residuals = size_residuals_normalized * g_type_size.unsqueeze(0).repeat(bs, 1, 1).cuda()
         return center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
                size_scores, size_residuals_normalized, size_residuals
+
+    def get_box3d_corners_helper(self, centers, headings, sizes):
+        """ Input: (N,3), (N,), (N,3), Output: (N,8,3) """
+        # print '-----', centers
+        N = centers.shape[0]
+        l = sizes[:, 0].view(N, 1)
+        w = sizes[:, 1].view(N, 1)
+        h = sizes[:, 2].view(N, 1)
+        # print l,w,h
+        x_corners = torch.cat([l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2], dim=1)  # (N,8)
+        y_corners = torch.cat([h / 2, h / 2, h / 2, h / 2, -h / 2, -h / 2, -h / 2, -h / 2], dim=1)  # (N,8)
+        z_corners = torch.cat([w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2], dim=1)  # (N,8)
+        corners = torch.cat([x_corners.view(N, 1, 8), y_corners.view(N, 1, 8),
+                             z_corners.view(N, 1, 8)], dim=1)  # (N,3,8)
+
+        ###ipdb.set_trace()
+        # print x_corners, y_corners, z_corners
+        c = torch.cos(headings).cuda()
+        s = torch.sin(headings).cuda()
+        ones = torch.ones([N], dtype=torch.float32).cuda()
+        zeros = torch.zeros([N], dtype=torch.float32).cuda()
+        row1 = torch.stack([c, zeros, s], dim=1)  # (N,3)
+        row2 = torch.stack([zeros, ones, zeros], dim=1)
+        row3 = torch.stack([-s, zeros, c], dim=1)
+        mat = torch.cat([row1.view(N, 1, 3), row2.view(N, 1, 3), row3.view(N, 1, 3)], axis=1)  # (N,3,3)
+        # print row1, row2, row3, R, N
+        corners_3d = torch.bmm(mat, corners)  # (N,3,8)
+        corners_3d += centers.view(N, 3, 1).repeat(1, 1, 8)  # (N,3,8)
+        corners_3d = torch.transpose(corners_3d, 1, 2)  # (N,8,3)
+        return corners_3d
+
+    def get_box3d_corners(self, center, heading_residuals, size_residuals):
+        """
+        Inputs:
+            center: (bs,3)
+            heading_residuals: (bs,NH)
+            size_residuals: (bs,NS,3)
+        Outputs:
+            box3d_corners: (bs,NH,NS,8,3) tensor
+        """
+        bs = center.shape[0]
+        heading_bin_centers = torch.from_numpy(
+            np.arange(0, 2 * np.pi, 2 * np.pi / NUM_HEADING_BIN)).float()  # (12,) (NH,)
+        headings = heading_residuals + heading_bin_centers.view(1, -1).cuda()  # (bs,12)
+        g_type_size = self.g_type_mean_size.cuda()
+        mean_sizes = g_type_size.view(1, NUM_SIZE_CLUSTER, 3) + size_residuals.cuda()  # (1,8,3)+(bs,8,3) = (bs,8,3)
+        sizes = mean_sizes + size_residuals  # (bs,8,3)
+        sizes = sizes.view(bs, 1, NUM_SIZE_CLUSTER, 3).repeat(1, NUM_HEADING_BIN, 1, 1).float()  # (B,12,8,3)
+        headings = headings.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER)  # (bs,12,8)
+        centers = center.view(bs, 1, 1, 3).repeat(1, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1)  # (bs,12,8,3)
+        N = bs * NUM_HEADING_BIN * NUM_SIZE_CLUSTER
+        ###ipdb.set_trace()
+        corners_3d = self.get_box3d_corners_helper(centers.view(N, 3), headings.view(N), sizes.view(N, 3))
+        ###ipdb.set_trace()
+        return corners_3d.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 8, 3)  # [32, 12, 8, 8, 3]
 
 
 class PointNetDetector(nn.Module):
@@ -434,7 +494,7 @@ class PointNetDetector(nn.Module):
             # center_reg_loss = self.CenterReg.get_loss(batch_target['center_label'], stage1_center)
             # box_reg_loss = self.BoxReg.get_loss(center, batch_target, box_pred)
             center_reg_loss = self.CenterReg.get_loss(rois['center_last'], batch_target['center_label'])
-            box_reg_loss = self.BoxReg.get_loss(rois['center'], batch_target, rois['box_pred'])
+            box_reg_loss = self.BoxReg.get_loss(rois['center'], batch_target, rois['box_reg'])
 
             loss = cls_loss + seg_loss_weight * seg_loss + box_loss_weight * (center_reg_loss + box_reg_loss)
             tb_dict = {}
@@ -735,65 +795,6 @@ class PointNetDetector(nn.Module):
                 object_pts[i, :, :] = pts[i, :, indices[i, :]]
             ###else?
         return object_pts, indices
-
-    def get_box3d_corners_helper(self, centers, headings, sizes):
-        """ Input: (N,3), (N,), (N,3), Output: (N,8,3) """
-        # print '-----', centers
-        N = centers.shape[0]
-        l = sizes[:, 0].view(N, 1)
-        w = sizes[:, 1].view(N, 1)
-        h = sizes[:, 2].view(N, 1)
-        # print l,w,h
-        x_corners = torch.cat([l / 2, l / 2, -l / 2, -l / 2, l / 2, l / 2, -l / 2, -l / 2], dim=1)  # (N,8)
-        y_corners = torch.cat([h / 2, h / 2, h / 2, h / 2, -h / 2, -h / 2, -h / 2, -h / 2], dim=1)  # (N,8)
-        z_corners = torch.cat([w / 2, -w / 2, -w / 2, w / 2, w / 2, -w / 2, -w / 2, w / 2], dim=1)  # (N,8)
-        corners = torch.cat([x_corners.view(N, 1, 8), y_corners.view(N, 1, 8),
-                             z_corners.view(N, 1, 8)], dim=1)  # (N,3,8)
-
-        ###ipdb.set_trace()
-        # print x_corners, y_corners, z_corners
-        c = torch.cos(headings).cuda()
-        s = torch.sin(headings).cuda()
-        ones = torch.ones([N], dtype=torch.float32).cuda()
-        zeros = torch.zeros([N], dtype=torch.float32).cuda()
-        row1 = torch.stack([c, zeros, s], dim=1)  # (N,3)
-        row2 = torch.stack([zeros, ones, zeros], dim=1)
-        row3 = torch.stack([-s, zeros, c], dim=1)
-        mat = torch.cat([row1.view(N, 1, 3), row2.view(N, 1, 3), row3.view(N, 1, 3)], axis=1)  # (N,3,3)
-        # print row1, row2, row3, R, N
-        corners_3d = torch.bmm(mat, corners)  # (N,3,8)
-        corners_3d += centers.view(N, 3, 1).repeat(1, 1, 8)  # (N,3,8)
-        corners_3d = torch.transpose(corners_3d, 1, 2)  # (N,8,3)
-        return corners_3d
-
-    def get_box3d_corners(self, center, heading_residuals, size_residuals):
-        """
-        Inputs:
-            center: (bs,3)
-            heading_residuals: (bs,NH)
-            size_residuals: (bs,NS,3)
-        Outputs:
-            box3d_corners: (bs,NH,NS,8,3) tensor
-        """
-        bs = center.shape[0]
-        heading_bin_centers = torch.from_numpy(
-            np.arange(0, 2 * np.pi, 2 * np.pi / NUM_HEADING_BIN)).float()  # (12,) (NH,)
-        headings = heading_residuals + heading_bin_centers.view(1, -1).cuda()  # (bs,12)
-
-        mean_sizes = torch.from_numpy(self.g_mean_size_arr).float().view(1, NUM_SIZE_CLUSTER, 3).cuda() \
-                     + size_residuals.cuda()  # (1,8,3)+(bs,8,3) = (bs,8,3)
-        sizes = mean_sizes + size_residuals  # (bs,8,3)
-        sizes = sizes.view(bs, 1, NUM_SIZE_CLUSTER, 3) \
-            .repeat(1, NUM_HEADING_BIN, 1, 1).float()  # (B,12,8,3)
-        headings = headings.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER)  # (bs,12,8)
-        centers = center.view(bs, 1, 1, 3).repeat(1, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1)  # (bs,12,8,3)
-        N = bs * NUM_HEADING_BIN * NUM_SIZE_CLUSTER
-        ###ipdb.set_trace()
-        corners_3d = self.get_box3d_corners_helper(centers.view(N, 3), headings.view(N),
-                                                   sizes.view(N, 3))
-        ###ipdb.set_trace()
-        return corners_3d.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 8, 3)  # [32, 12, 8, 8, 3]
-
 
     # @torch.no_grad()
     # def generate_proposals(self, batch_dict, model_cfg):
