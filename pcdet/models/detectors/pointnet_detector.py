@@ -410,13 +410,13 @@ class PointNetDetector(nn.Module):
         size_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
         size_residual = torch.zeros((rois['batch_size'], 3))
         heading_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
-        heading_residual = torch.zeros((rois['batch_size'], 3))
+        heading_residual = torch.zeros((rois['batch_size']))
         for i in range(rois['batch_size']):
             # rois[i] with best matched gt box [k]
             k = 0
             center_label[i, :] = rois['gt_boxes'][i, k, :3]
-            box_size = rois['gt_boxes'][i, k, 3:6]
-            heading = rois['gt_boxes'][i, k, 6]
+            box_size = rois['gt_boxes'][i, k, 3:6].cpu()
+            heading = rois['gt_boxes'][i, k, 6].cpu()
             size_cls_label[i] = rois['gt_boxes'][i, k, -1]
             size_residual[i, :] = box_size - self.g_type_mean_size[size_cls_label[i], :]
             angle = heading % (2 * np.pi)
@@ -424,7 +424,7 @@ class PointNetDetector(nn.Module):
             angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
             shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
             heading_cls_label[i] = int(shifted_angle / angle_per_class)
-            heading_residual[i, :] = shifted_angle - (heading_cls_label * angle_per_class + angle_per_class / 2)
+            heading_residual[i] = shifted_angle - (heading_cls_label[i] * angle_per_class + angle_per_class / 2)
 
         # center_label = rois['pos'][:, :3]
         # box_size = rois['pos'][:, 3:6]
