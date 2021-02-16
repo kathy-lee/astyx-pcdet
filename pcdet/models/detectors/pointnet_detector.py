@@ -8,21 +8,7 @@ from pcdet.ops.iou3d_nms.iou3d_nms_utils import boxes_iou3d_gpu
 from pcdet.ops.roiaware_pool3d import roiaware_pool3d_utils
 
 NUM_HEADING_BIN = 12
-NUM_SIZE_CLUSTER = 8  # one cluster for each type
-
-
-def make_fc_layers(fc_list, input_channels, output_channels):
-    fc_layers = []
-    c_in = input_channels
-    for k in range(0, fc_list.__len__()):
-        fc_layers.extend([
-            nn.Linear(c_in, fc_list[k], bias=False),
-            nn.BatchNorm1d(fc_list[k]),
-            nn.ReLU(),
-        ])
-        c_in = fc_list[k]
-    fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
-    return nn.Sequential(*fc_layers)
+NUM_SIZE_CLUSTER = 3  # one cluster for each type
 
 
 class PointNetv1(nn.Module):
@@ -41,7 +27,7 @@ class PointNetv1(nn.Module):
         self.bn3 = nn.BatchNorm1d(64)
         self.bn4 = nn.BatchNorm1d(128)
         self.bn5 = nn.BatchNorm1d(1024)
-        self.cls_layers = make_fc_layers(fc_list=model_cfg, input_channels=1024, output_channels=num_classes)
+        self.cls_layers = self.make_fc_layers(fc_list=model_cfg, input_channels=1024, output_channels=num_classes)
         self.n_sample = 256
         self.pos_iou_thresh = 0.7
         self.neg_iou_thresh = 0.3
@@ -70,6 +56,19 @@ class PointNetv1(nn.Module):
             'cls_logits': logits
         }
         return feature_dict
+
+    def make_fc_layers(self, fc_list, input_channels, output_channels):
+        fc_layers = []
+        c_in = input_channels
+        for k in range(0, fc_list.__len__()):
+            fc_layers.extend([
+                nn.Linear(c_in, fc_list[k], bias=False),
+                nn.BatchNorm1d(fc_list[k]),
+                nn.ReLU(),
+            ])
+            c_in = fc_list[k]
+        fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
+        return nn.Sequential(*fc_layers)
 
     def get_loss(self, pred, target):
         loss = F.cross_entropy(pred, target)
