@@ -403,8 +403,6 @@ class PointNetDetector(nn.Module):
     def assign_targets2(self, batch_dict, rois):
         cls_label = self.assign_proposal_target2(batch_dict)
         point_label = self.assign_seg_target(rois)
-        print('assign target:')
-        print(cls_label.shape, point_label.shape)
 
         center_label = torch.zeros((rois['batch_size'], 3))
         size_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
@@ -480,6 +478,15 @@ class PointNetDetector(nn.Module):
         #     residual_angle = shifted_angle - (class_id * angle_per_class + angle_per_class / 2)
         #     return class_id, residual_angle
 
+        print('assign target:')
+        print(cls_label.shape)
+        print(point_label.shape)
+        print(center_label.shape)
+        print(size_cls_label.shape)
+        print(size_residual.shape)
+        print(heading_cls_label.shape)
+        print(heading_residual.shape)
+
         target_dict = {
             'cls_label': cls_label.cuda(),
             'point_label': point_label.cuda(),
@@ -494,9 +501,8 @@ class PointNetDetector(nn.Module):
     def assign_proposal_target2(self, batch_data, n_sample=2, pos_iou_thresh=0.7, neg_iou_thresh=0.3, pos_ratio=0.5):
         poses = batch_data['pos']
         gt_boxes = batch_data['gt_boxes'][:, :, :7]
-        print('assign proposal target:')
-        print(poses.shape, gt_boxes.shape)
-        label = -torch.ones([len(poses)], dtype=torch.int32)
+
+        label = -torch.ones([len(poses)], dtype=torch.long)
         # max_ious, gt_argmax_ious = self._calc_ious(poses, gt_boxes)
         # label[max_ious < neg_iou_thresh] = 0
         # label[gt_argmax_ious] = 1
