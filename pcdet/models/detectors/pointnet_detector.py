@@ -172,6 +172,13 @@ class CenterRegNet(nn.Module):
         print(f'after center reg: %d' % bs)
         return data_dict
 
+    def huber_loss(self, error, delta=1.0):  # (32,), ()
+        abs_error = torch.abs(error)
+        quadratic = torch.clamp(abs_error, max=delta)
+        linear = (abs_error - quadratic)
+        losses = 0.5 * quadratic ** 2 + delta * linear
+        return torch.mean(losses)
+
     def get_loss(self, center_pred, center_label):
         center_dist = torch.norm(center_pred - center_label, dim=1)  # (32,)
         center_loss = self.huber_loss(center_dist, delta=1.0)
@@ -234,14 +241,21 @@ class BoxRegNet(nn.Module):
         data_dict.update({'box_reg_pred': box_pred})
         return data_dict
 
+    def huber_loss(self, error, delta=1.0):  # (32,), ()
+        abs_error = torch.abs(error)
+        quadratic = torch.clamp(abs_error, max=delta)
+        linear = (abs_error - quadratic)
+        losses = 0.5 * quadratic ** 2 + delta * linear
+        return torch.mean(losses)
+
     def get_loss(self, center, batch_target, box_pred, corner_loss_weight=10.0):
         bs = box_pred.shape[0]
 
         center_label = batch_target['center_label']
-        head_cls_label = batch_target['hclass']
-        head_res_label = batch_target['hres']
-        size_cls_label = batch_target['sclass']
-        size_res_label = batch_target['sres']
+        head_cls_label = batch_target['head_cls']
+        head_res_label = batch_target['head_res']
+        size_cls_label = batch_target['size_cls']
+        size_res_label = batch_target['size_res']
 
         _, head_scores, head_res_norm, head_res, size_scores, size_res_norm, size_res = self.parse_to_tensors(box_pred)
 
@@ -289,6 +303,40 @@ class BoxRegNet(nn.Module):
         loss = center_loss + head_cls_loss + size_cls_loss + (head_res_norm_loss + size_res_norm_loss) * 20 \
                + corner_loss_weight * corners_loss
         return loss
+
+    def parse_to_tensors(self, box_pred):
+        """
+        :param box_pred: (bs,59)
+        :return:
+            center_boxnet:(bs,3)
+            heading_scores:(bs,12)
+            heading_residuals_normalized:(bs,12),-1 to 1
+            heading_residuals:(bs,12)
+            size_scores:(bs,8)
+            size_residuals_normalized:(bs,8)
+            size_residuals:(bs,8)
+        """
+        bs = box_pred.shape[0]
+        # center
+        center_boxnet = box_pred[:, :3]  # 0:3
+
+        # heading
+        c = 3
+        heading_scores = box_pred[:, c:c + NUM_HEADING_BIN]  # 3:3+12
+        c += NUM_HEADING_BIN
+        heading_residuals_normalized = box_pred[:, c:c + NUM_HEADING_BIN]  # 3+12 : 3+2*12
+        heading_residuals = heading_residuals_normalized * (np.pi / NUM_HEADING_BIN)
+        c += NUM_HEADING_BIN
+
+        # size
+        size_scores = box_pred[:, c:c + NUM_SIZE_CLUSTER]  # 3+2*12 : 3+2*12+8
+        c += NUM_SIZE_CLUSTER
+        size_residuals_normalized = box_pred[:, c:c + 3 * NUM_SIZE_CLUSTER].contiguous()  # [32,24] 3+2*12+8 : 3+2*12+4*8
+        size_residuals_normalized = size_residuals_normalized.view(bs, NUM_SIZE_CLUSTER, 3)  # [32,8,3]
+        size_residuals = size_residuals_normalized * \
+                         torch.from_numpy(self.g_mean_size_arr).unsqueeze(0).repeat(bs, 1, 1).cuda()
+        return center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
+               size_scores, size_residuals_normalized, size_residuals
 
 
 class PointNetDetector(nn.Module):
@@ -688,40 +736,6 @@ class PointNetDetector(nn.Module):
             ###else?
         return object_pts, indices
 
-    def parse_output_to_tensors(self, box_pred):
-        """
-        :param box_pred: (bs,59)
-        :return:
-            center_boxnet:(bs,3)
-            heading_scores:(bs,12)
-            heading_residuals_normalized:(bs,12),-1 to 1
-            heading_residuals:(bs,12)
-            size_scores:(bs,8)
-            size_residuals_normalized:(bs,8)
-            size_residuals:(bs,8)
-        """
-        bs = box_pred.shape[0]
-        # center
-        center_boxnet = box_pred[:, :3]  # 0:3
-
-        # heading
-        c = 3
-        heading_scores = box_pred[:, c:c + NUM_HEADING_BIN]  # 3:3+12
-        c += NUM_HEADING_BIN
-        heading_residuals_normalized = box_pred[:, c:c + NUM_HEADING_BIN]  # 3+12 : 3+2*12
-        heading_residuals = heading_residuals_normalized * (np.pi / NUM_HEADING_BIN)
-        c += NUM_HEADING_BIN
-
-        # size
-        size_scores = box_pred[:, c:c + NUM_SIZE_CLUSTER]  # 3+2*12 : 3+2*12+8
-        c += NUM_SIZE_CLUSTER
-        size_residuals_normalized = box_pred[:, c:c + 3 * NUM_SIZE_CLUSTER].contiguous()  # [32,24] 3+2*12+8 : 3+2*12+4*8
-        size_residuals_normalized = size_residuals_normalized.view(bs, NUM_SIZE_CLUSTER, 3)  # [32,8,3]
-        size_residuals = size_residuals_normalized * \
-                         torch.from_numpy(self.g_mean_size_arr).unsqueeze(0).repeat(bs, 1, 1).cuda()
-        return center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
-               size_scores, size_residuals_normalized, size_residuals
-
     def get_box3d_corners_helper(self, centers, headings, sizes):
         """ Input: (N,3), (N,), (N,3), Output: (N,8,3) """
         # print '-----', centers
@@ -780,12 +794,6 @@ class PointNetDetector(nn.Module):
         ###ipdb.set_trace()
         return corners_3d.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 8, 3)  # [32, 12, 8, 8, 3]
 
-    def huber_loss(self, error, delta=1.0):  # (32,), ()
-        abs_error = torch.abs(error)
-        quadratic = torch.clamp(abs_error, max=delta)
-        linear = (abs_error - quadratic)
-        losses = 0.5 * quadratic ** 2 + delta * linear
-        return torch.mean(losses)
 
     # @torch.no_grad()
     # def generate_proposals(self, batch_dict, model_cfg):
