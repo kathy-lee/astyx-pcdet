@@ -150,8 +150,10 @@ class CenterRegNet(nn.Module):
 
     def forward(self, data_dict):
         bs = data_dict['batch_size']
-        print(data_dict['points'].size())
-        x = F.relu(self.bn1(self.conv1(data_dict['points'])))  # bs,128,n
+        pts = data_dict['points']
+        print('center regression: ')
+        print(pts.size())
+        x = F.relu(self.bn1(self.conv1(pts)))  # bs,128,n
         x = F.relu(self.bn2(self.conv2(x)))  # bs,128,n
         x = F.relu(self.bn3(self.conv3(x)))  # bs,256,n
         x = torch.max(x, 2)[0]  # bs,256
@@ -159,7 +161,7 @@ class CenterRegNet(nn.Module):
         x = torch.cat([x, expand_one_hot_vec], 1)  # bs,259
         x = F.relu(self.fcbn1(self.fc1(x)))  # bs,256
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,128
-        x = self.fc3(x)  # bs,
+        x = self.fc3(x)  # bs,3
         print(x.size())
 
         pts_new = pts.clone()
@@ -169,14 +171,15 @@ class CenterRegNet(nn.Module):
         center_new = data_dict['center'] + x
         data_dict.update({'center': center_new})  # (32,3)
         data_dict.update({'points': pts_new})
-        print(f'after center reg: %d' % bs)
         return data_dict
 
     def huber_loss(self, error, delta=1.0):  # (32,), ()
         abs_error = torch.abs(error)
         quadratic = torch.clamp(abs_error, max=delta)
-        linear = (abs_error - quadratic)
+        linear = abs_error - quadratic
         losses = 0.5 * quadratic ** 2 + delta * linear
+        print('huber loss :')
+        print(losses)
         return torch.mean(losses)
 
     def get_loss(self, center_pred, center_label):
@@ -230,10 +233,9 @@ class BoxRegNet(nn.Module):
         global_feat = torch.max(out4, 2, keepdim=False)[0]  # bs,512
 
         expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1).cuda()  # bs,3
-        print(global_feat.size(), expand_one_hot_vec.size())  # torch.Size([2, 512]) torch.Size([2, 2])
+        #print(global_feat.size(), expand_one_hot_vec.size())  # torch.Size([2, 512]) torch.Size([2, 2])
         expand_global_feat = torch.cat([global_feat, expand_one_hot_vec], 1)  # bs,515
-        print(expand_global_feat.size())
-        x = self.fc1(expand_global_feat)
+        #print(expand_global_feat.size())
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,256
         box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
@@ -248,7 +250,7 @@ class BoxRegNet(nn.Module):
     def huber_loss(self, error, delta=1.0):  # (32,), ()
         abs_error = torch.abs(error)
         quadratic = torch.clamp(abs_error, max=delta)
-        linear = (abs_error - quadratic)
+        linear = abs_error - quadratic
         losses = 0.5 * quadratic ** 2 + delta * linear
         return torch.mean(losses)
 
@@ -586,14 +588,14 @@ class PointNetDetector(nn.Module):
         #     residual_angle = shifted_angle - (class_id * angle_per_class + angle_per_class / 2)
         #     return class_id, residual_angle
 
-        print('assign target:')
-        print(cls_label.shape)
-        print(point_label.shape)
-        print(center_label.shape)
-        print(size_cls_label.shape)
-        print(size_residual.shape)
-        print(heading_cls_label.shape)
-        print(heading_residual.shape)
+        # print('assign target:')
+        # print(cls_label)
+        # print(point_label)
+        # print(center_label)
+        # print(size_cls_label)
+        # print(size_residual)
+        # print(heading_cls_label)
+        # print(heading_residual)
 
         target_dict = {
             'cls_label': cls_label.cuda(),
