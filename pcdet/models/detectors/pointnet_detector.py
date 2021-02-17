@@ -162,8 +162,9 @@ class CenterRegNet(nn.Module):
         x = self.fc3(x)  # bs,
         print(x.size())
 
-        pts_new = data_dict['points']
-        pts_new[:, :3, :] -= x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['points'].shape[-1])
+        pts_new = pts.clone()
+        # pts_new[:, :3, :] -= x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['points'].shape[-1])
+        pts_new[:, :3, :] = pts[:, :3, :] - x.view(x.shape[0], -1, 1).repeat(1, 1, pts.shape[-1])
 
         center_new = data_dict['center'] + x
         data_dict.update({'center': center_new})  # (32,3)
