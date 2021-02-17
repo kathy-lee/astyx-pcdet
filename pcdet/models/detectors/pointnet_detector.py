@@ -527,7 +527,7 @@ class PointNetDetector(nn.Module):
             center_label[i, :] = rois['gt_boxes'][i, k, :3]
             box_size = rois['gt_boxes'][i, k, 3:6]
             heading = rois['gt_boxes'][i, k, 6]
-            size_cls_label[i] = rois['gt_boxes'][i, k, -1]
+            size_cls_label[i] = rois['gt_boxes'][i, k, -1] - 1
             size_residual[i, :] = box_size - g_type_size[size_cls_label[i], :]
             angle = heading % (2 * torch.pi)
             assert (angle >= 0 and angle <= 2 * torch.pi)
@@ -732,8 +732,8 @@ class PointNetDetector(nn.Module):
             box_fg_flag = (box_idxs_of_pts >= 0)
             fg_flag = box_fg_flag
             gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
-            point_cls_labels_single[fg_flag] = 1 if self.n_classes == 1 else gt_box_of_fg_points[:, -1].long()
-            point_cls_labels[k*n_pts : (k+1)*n_pts] = point_cls_labels_single
+            point_cls_labels_single[fg_flag] = 1  # if self.n_classes == 1 else gt_box_of_fg_points[:, -1].long()
+            point_cls_labels[k*n_pts: (k+1)*n_pts] = point_cls_labels_single
         return point_cls_labels
 
     def point_cloud_masking(self, data_dict, xyz_only=True):
