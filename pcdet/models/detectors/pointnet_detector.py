@@ -494,7 +494,7 @@ class PointNetDetector(nn.Module):
         rois = self.point_cloud_masking(rois)  # add rois{'center'}
         rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
         rois = self.BoxReg(rois)
-        print('Network forwarding finished.')
+        # print('Network forwarding finished.')
         if self.training:
             # batch_target = self.assign_targets(batch_dict, proposals, rois)
             batch_target = self.assign_targets2(batch_dict, rois)
@@ -719,7 +719,7 @@ class PointNetDetector(nn.Module):
         max_ious = ious[np.arange(anchor.size()[0]), argmax_ious]  # [1,N]
         gt_argmax_ious = ious.argmax(axis=0)
         gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
-        gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # K
+        gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
         return max_ious, gt_argmax_ious
 
     @staticmethod
@@ -753,8 +753,8 @@ class PointNetDetector(nn.Module):
         bs = pts.shape[0]
         n_pts = pts.shape[2]
         # Binary Classification for each point
-        masks = float(logits[:, :, 0] < logits[:, :, 1])  # (bs, n)
-        mask = torch.tensor(masks).unsqueeze(1)  # (bs, 1, n)
+        mask = logits[:, :, 0] < logits[:, :, 1]  # (bs, n)
+        mask = mask.float().unsqueeze(1)  # (bs, 1, n)
         mask_count = mask.sum(2, keepdim=True).repeat(1, 3, 1)  # (bs, 3, 1)
         pts_xyz = pts[:, :3, :]  # (bs,3,n)
         mask_xyz_mean = (mask.repeat(1, 3, 1) * pts_xyz).sum(2, keepdim=True)  # (bs, 3, 1)
@@ -853,15 +853,16 @@ class PointNetDetector(nn.Module):
         proposals.update(features)
         indices = [index for index, value in enumerate(proposals['cls_pred'][:, 1]) if value == 1]
         indices = [0, 1]
-        print(indices)
+        # print(indices)
         rois = {}
-        for key, value in proposals.items():
-            if key == 'batch_size':
-                pass
-            else:
-                rois[key] = value[indices]
-        rois.update({'batch_size': len(indices)})
-        print(f'get number of ROIs: %d' % rois['batch_size'])
+        if indices:
+            for key, value in proposals.items():
+                if key == 'batch_size':
+                    pass
+                else:
+                    rois[key] = value[indices]
+            rois.update({'batch_size': len(indices)})
+            # print(f'get number of ROIs: %d' % rois['batch_size'])
 
         # rois = [dict(item, **{'feature': features[index]}) for index, item in enumerate(proposals)]
         # order = proposals['cls_pred'].ravel().argsort()[::-1]
@@ -870,7 +871,6 @@ class PointNetDetector(nn.Module):
         # keep = class_agnostic_nms(rois)
         # keep = keep[:n_post_nms]
         # rois = rois[keep]
-
         return rois
 
     def update_global_step(self):
