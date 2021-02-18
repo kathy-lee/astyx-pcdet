@@ -33,14 +33,14 @@ class PointNetv1(nn.Module):
         self.pos_ratio = 0.5
 
     def forward(self, batch_data):  # bs,4,n
-        print(batch_data.shape)
+        # print(batch_data.shape)
         out1 = F.relu(self.bn1(self.conv1(batch_data)))  # bs,64,n
         out2 = F.relu(self.bn2(self.conv2(out1)))  # bs,64,n
         out3 = F.relu(self.bn3(self.conv3(out2)))  # bs,64,n
         out4 = F.relu(self.bn4(self.conv4(out3)))  # bs,128,n
         out5 = F.relu(self.bn5(self.conv5(out4)))  # bs,1024,n
         global_feat = torch.max(out5, 2, keepdim=True)[0]  # bs,1024,1
-        print(global_feat.size())
+        # print(global_feat.size())
         logits = self.cls_layers(np.squeeze(global_feat, axis=2))
         softmax = nn.Softmax(dim=1)
         cls_score = softmax(logits)
@@ -56,7 +56,8 @@ class PointNetv1(nn.Module):
         }
         return feature_dict
 
-    def make_fc_layers(self, fc_list, input_channels, output_channels):
+    @staticmethod
+    def make_fc_layers(fc_list, input_channels, output_channels):
         fc_layers = []
         c_in = input_channels
         for k in range(0, fc_list.__len__()):
@@ -69,8 +70,9 @@ class PointNetv1(nn.Module):
         fc_layers.append(nn.Linear(c_in, output_channels, bias=True))
         return nn.Sequential(*fc_layers)
 
-    def get_loss(self, pred, target):
-        loss = F.cross_entropy(pred, target)
+    @staticmethod
+    def get_loss(pred, target):
+        loss = F.cross_entropy(pred, target, ignore_index=-1)
         return loss
 
 
@@ -111,14 +113,15 @@ class PointSeg(nn.Module):
         x = self.dconv5(x)  # bs, 2, n
 
         seg_pred = x.transpose(2, 1).contiguous()  # bs, n, 2
-        print('point segment prediction: ')
-        print(seg_pred.size())
+        # print('point segment prediction: ')
+        # print(seg_pred.size())
         data_dict.update({'seg_logits': seg_pred})
         data_dict.pop('global_feat')
         data_dict.pop('local_feat')
         return data_dict
 
-    def get_loss(self, pred, target):
+    @staticmethod
+    def get_loss(pred, target):
         logits = F.log_softmax(pred.view(-1, 2), dim=1)  # torch.Size([32768, 2])
         mask_label = target.view(-1).long()  # torch.Size([32768])
         loss = F.nll_loss(logits, mask_label)  # tensor(0.6361, grad_fn=<NllLossBackward>)
@@ -151,8 +154,8 @@ class CenterRegNet(nn.Module):
     def forward(self, data_dict):
         bs = data_dict['batch_size']
         pts = data_dict['points']
-        print('center regression: ')
-        print(pts.size())
+        # print('center regression: ')
+        # print(pts.size())
         x = F.relu(self.bn1(self.conv1(pts)))  # bs,128,n
         x = F.relu(self.bn2(self.conv2(x)))  # bs,128,n
         x = F.relu(self.bn3(self.conv3(x)))  # bs,256,n
@@ -162,7 +165,7 @@ class CenterRegNet(nn.Module):
         x = F.relu(self.fcbn1(self.fc1(x)))  # bs,256
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,128
         x = self.fc3(x)  # bs,3
-        print(x.size())
+        # print(x.size())
 
         pts_new = pts.clone()
         # pts_new[:, :3, :] -= x.view(x.shape[0], -1, 1).repeat(1, 1, data_dict['points'].shape[-1])
@@ -173,13 +176,14 @@ class CenterRegNet(nn.Module):
         data_dict.update({'points': pts_new})
         return data_dict
 
-    def huber_loss(self, error, delta=1.0):  # (32,), ()
+    @staticmethod
+    def huber_loss(error, delta=1.0):  # (32,), ()
         abs_error = torch.abs(error)
         quadratic = torch.clamp(abs_error, max=delta)
         linear = abs_error - quadratic
         losses = 0.5 * quadratic ** 2 + delta * linear
-        print('huber loss :')
-        print(losses)
+        # print('huber loss :')
+        # print(losses)
         return torch.mean(losses)
 
     def get_loss(self, center_pred, center_label):
@@ -233,9 +237,9 @@ class BoxRegNet(nn.Module):
         global_feat = torch.max(out4, 2, keepdim=False)[0]  # bs,512
 
         expand_one_hot_vec = data_dict['cls_pred'].view(bs, -1).cuda()  # bs,3
-        #print(global_feat.size(), expand_one_hot_vec.size())  # torch.Size([2, 512]) torch.Size([2, 2])
+        # print(global_feat.size(), expand_one_hot_vec.size())  # torch.Size([2, 512]) torch.Size([2, 2])
         expand_global_feat = torch.cat([global_feat, expand_one_hot_vec], 1)  # bs,515
-        #print(expand_global_feat.size())
+        # print(expand_global_feat.size())
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,256
         box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
@@ -247,7 +251,8 @@ class BoxRegNet(nn.Module):
         data_dict.update({'box_reg': box_pred})
         return data_dict
 
-    def huber_loss(self, error, delta=1.0):  # (32,), ()
+    @staticmethod
+    def huber_loss(error, delta=1.0):  # (32,), ()
         abs_error = torch.abs(error)
         quadratic = torch.clamp(abs_error, max=delta)
         linear = abs_error - quadratic
@@ -270,37 +275,37 @@ class BoxRegNet(nn.Module):
         center_loss = self.huber_loss(center_dist, delta=2.0)
 
         # Heading Loss
-        head_cls_loss = F.nll_loss(F.log_softmax(head_scores, dim=1), head_cls_label.long())  # tensor(2.4505, grad_fn=<NllLossBackward>)
+        head_cls_loss = F.nll_loss(F.log_softmax(head_scores, dim=1), head_cls_label.long())
         hcls_onehot = torch.eye(NUM_HEADING_BIN)[head_cls_label.long()].cuda()  # 32,12
         head_res_norm_label = head_res_label / (np.pi / NUM_HEADING_BIN)  # 32
         head_res_norm_dist = torch.sum(head_res_norm * hcls_onehot.float(), dim=1)  # 32
-        ### Only compute reg loss on gt label
+        # Only compute reg loss on gt label
         head_res_norm_loss = self.huber_loss(head_res_norm_dist - head_res_norm_label, delta=1.0)
 
         # Size loss
         g_type_size = self.g_type_mean_size.cuda()
-        size_cls_loss = F.nll_loss(F.log_softmax(size_scores, dim=1), size_cls_label.long())  # tensor(2.0240, grad_fn=<NllLossBackward>)
+        size_cls_loss = F.nll_loss(F.log_softmax(size_scores, dim=1), size_cls_label.long())
         scls_onehot = torch.eye(NUM_SIZE_CLUSTER)[size_cls_label.long()].cuda()  # 32,8
         scls_onehot_repeat = scls_onehot.view(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 1, 3)  # 32,8,3
         predicted_size_residual_normalized_dist = torch.sum(size_res_norm * scls_onehot_repeat.cuda(), dim=1)  # 32,3
-        mean_size_arr_expand = g_type_size.view(1, NUM_SIZE_CLUSTER, 3)#1,8,3
+        mean_size_arr_expand = g_type_size.view(1, NUM_SIZE_CLUSTER, 3)  # 1,8,3
         mean_size_label = torch.sum(scls_onehot_repeat * mean_size_arr_expand, dim=1)  # 32,3
         size_res_label_norm = size_res_label / mean_size_label.cuda()
         size_normalized_dist = torch.norm(size_res_label_norm - predicted_size_residual_normalized_dist, dim=1)  # 32
-        size_res_norm_loss = self.huber_loss(size_normalized_dist, delta=1.0)  # tensor(11.2784, grad_fn=<MeanBackward0>)
+        size_res_norm_loss = self.huber_loss(size_normalized_dist, delta=1.0)
 
         # Corner Loss
         corners_3d = self.get_box3d_corners(center, head_res, size_res).cuda()  # (bs,NH,NS,8,3)(32, 12, 8, 8, 3)
-        gt_mask = hcls_onehot.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER) * \
-                  scls_onehot.view(bs, 1, NUM_SIZE_CLUSTER).repeat(1, NUM_HEADING_BIN, 1)  # (bs,NH=12,NS=8)
-        corners_3d_pred = torch.sum(gt_mask.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1, 1) \
+        gt_mask = hcls_onehot.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER) \
+                  * scls_onehot.view(bs, 1, NUM_SIZE_CLUSTER).repeat(1, NUM_HEADING_BIN, 1)  # (bs,NH=12,NS=8)
+        corners_3d_pred = torch.sum(gt_mask.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1, 1)
                                     .float().cuda() * corners_3d, dim=[1, 2])  # (bs,8,3)
         heading_bin_centers = torch.from_numpy(np.arange(0, 2 * np.pi, 2 * np.pi / NUM_HEADING_BIN)).float().cuda()  # (NH,)
-        heading_label = head_res_label.view(bs, 1) + heading_bin_centers.view(1,NUM_HEADING_BIN)  # (bs,1)+(1,NH)=(bs,NH)
+        heading_label = head_res_label.view(bs, 1) + heading_bin_centers.view(1, NUM_HEADING_BIN)  # (bs,1)+(1,NH)=(bs,NH)
         heading_label = torch.sum(hcls_onehot.float() * heading_label, 1)
-        mean_sizes = g_type_size.view(1, NUM_SIZE_CLUSTER, 3) # (1,NS,3)
+        mean_sizes = g_type_size.view(1, NUM_SIZE_CLUSTER, 3)  # (1,NS,3)
         size_label = mean_sizes + size_res_label.view(bs, 1, 3)  # (1,NS,3)+(bs,1,3)=(bs,NS,3)
-        size_label = torch.sum(scls_onehot.view(bs, NUM_SIZE_CLUSTER, 1).float() * size_label, axis=[1])  # (B,3)
+        size_label = torch.sum(scls_onehot.view(bs, NUM_SIZE_CLUSTER, 1).float() * size_label, dim=1)  # (B,3)
         corners_3d_gt = self.get_box3d_corners_helper(center_label, heading_label, size_label)  # (B,8,3)
         corners_3d_gt_flip = self.get_box3d_corners_helper(center_label, heading_label + np.pi, size_label)  # (B,8,3)
         corners_dist = torch.min(torch.norm(corners_3d_pred - corners_3d_gt, dim=-1),
@@ -345,7 +350,8 @@ class BoxRegNet(nn.Module):
         return center_boxnet, heading_scores, heading_residuals_normalized, heading_residuals, \
                size_scores, size_residuals_normalized, size_residuals
 
-    def get_box3d_corners_helper(self, centers, headings, sizes):
+    @staticmethod
+    def get_box3d_corners_helper(centers, headings, sizes):
         """ Input: (N,3), (N,), (N,3), Output: (N,8,3) """
         # print '-----', centers
         N = centers.shape[0]
@@ -359,7 +365,7 @@ class BoxRegNet(nn.Module):
         corners = torch.cat([x_corners.view(N, 1, 8), y_corners.view(N, 1, 8),
                              z_corners.view(N, 1, 8)], dim=1)  # (N,3,8)
 
-        ###ipdb.set_trace()
+        # ipdb.set_trace()
         # print x_corners, y_corners, z_corners
         c = torch.cos(headings).cuda()
         s = torch.sin(headings).cuda()
@@ -368,7 +374,7 @@ class BoxRegNet(nn.Module):
         row1 = torch.stack([c, zeros, s], dim=1)  # (N,3)
         row2 = torch.stack([zeros, ones, zeros], dim=1)
         row3 = torch.stack([-s, zeros, c], dim=1)
-        mat = torch.cat([row1.view(N, 1, 3), row2.view(N, 1, 3), row3.view(N, 1, 3)], axis=1)  # (N,3,3)
+        mat = torch.cat([row1.view(N, 1, 3), row2.view(N, 1, 3), row3.view(N, 1, 3)], dim=1)  # (N,3,3)
         # print row1, row2, row3, R, N
         corners_3d = torch.bmm(mat, corners)  # (N,3,8)
         corners_3d += centers.view(N, 3, 1).repeat(1, 1, 8)  # (N,3,8)
@@ -395,9 +401,9 @@ class BoxRegNet(nn.Module):
         headings = headings.view(bs, NUM_HEADING_BIN, 1).repeat(1, 1, NUM_SIZE_CLUSTER)  # (bs,12,8)
         centers = center.view(bs, 1, 1, 3).repeat(1, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 1)  # (bs,12,8,3)
         N = bs * NUM_HEADING_BIN * NUM_SIZE_CLUSTER
-        ###ipdb.set_trace()
+        # ipdb.set_trace()
         corners_3d = self.get_box3d_corners_helper(centers.view(N, 3), headings.view(N), sizes.view(N, 3))
-        ###ipdb.set_trace()
+        # ipdb.set_trace()
         return corners_3d.view(bs, NUM_HEADING_BIN, NUM_SIZE_CLUSTER, 8, 3)  # [32, 12, 8, 8, 3]
 
 
@@ -419,9 +425,11 @@ class PointNetDetector(nn.Module):
         # self.g_type_mean_size = {'Car': np.array([3.88311640418, 1.62856739989, 1.52563191462]),
         #                          'Pedestrian': np.array([0.84422524, 0.66068622, 1.76255119]),
         #                          'Cyclist': np.array([1.76282397, 0.59706367, 1.73698127])}
-        self.g_type_mean_size = torch.tensor([[3.88311640418, 1.62856739989, 1.52563191462],
-                                          [0.84422524, 0.66068622, 1.76255119],
-                                          [1.76282397, 0.59706367, 1.73698127]])
+        self.g_type_mean_size = torch.tensor([
+            [3.88311640418, 1.62856739989, 1.52563191462],
+            [0.84422524, 0.66068622, 1.76255119],
+            [1.76282397, 0.59706367, 1.73698127]
+        ])
         # self.g_mean_size_arr = np.zeros((self.NUM_SIZE_CLUSTER, 3))  # size clusters
         # for i in range(self.NUM_SIZE_CLUSTER):
         #     self.g_mean_size_arr[i, :] = self.g_type_mean_size[i]
@@ -520,7 +528,7 @@ class PointNetDetector(nn.Module):
         heading_cls_label = torch.zeros((rois['batch_size']), dtype=torch.int32)
         heading_residual = torch.zeros((rois['batch_size']))
         g_type_size = self.g_type_mean_size.cuda()
-        torch.pi = torch.acos(torch.zeros(1)).item() * 2
+        pi = torch.acos(torch.zeros(1)).item() * 2
         for i in range(rois['batch_size']):
             # rois[i] with best matched gt box [k]
             k = 0
@@ -529,10 +537,10 @@ class PointNetDetector(nn.Module):
             heading = rois['gt_boxes'][i, k, 6]
             size_cls_label[i] = rois['gt_boxes'][i, k, -1] - 1
             size_residual[i, :] = box_size - g_type_size[size_cls_label[i], :]
-            angle = heading % (2 * torch.pi)
-            assert (angle >= 0 and angle <= 2 * torch.pi)
-            angle_per_class = 2 * torch.pi / float(NUM_HEADING_BIN)
-            shifted_angle = (angle + angle_per_class / 2) % (2 * torch.pi)
+            angle = heading % (2 * pi)
+            assert (0 <= angle <= 2 * pi)
+            angle_per_class = 2 * pi / float(NUM_HEADING_BIN)
+            shifted_angle = (angle + angle_per_class / 2) % (2 * pi)
             heading_cls_label[i] = int(shifted_angle / angle_per_class)
             heading_residual[i] = shifted_angle - (heading_cls_label[i] * angle_per_class + angle_per_class / 2)
 
@@ -629,9 +637,9 @@ class PointNetDetector(nn.Module):
         n_pos = int(pos_ratio * n_sample)
         pos_index = np.where(label == 1)[0]
         if len(pos_index) > n_pos:
-            disable_index = np.random.choice(
-                pos_index, size=(len(pos_index) - n_pos), replace=False)
+            disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
             label[disable_index] = -1
+
         n_neg = n_sample - torch.sum(label == 1)
         neg_index = np.where(label == 0)[0]
         if len(neg_index) > n_neg:
@@ -639,86 +647,88 @@ class PointNetDetector(nn.Module):
             label[disable_index] = -1
         return label
 
-    def assign_targets(self, batch_dict, proposals, rois):
-        '''
-        :return:
-            batch_target['cls_label']: assigned targets for classification of proposals
-            batch_target['point_label']: assigned targets for point segmentation
-            batch_target['center_label']: center regression label
-            batch_target['hclass']: assigned head label for box regression
-            batch_target['hres']: head regression label
-            batch_target['sclass']: assigned size label for box regression
-            batch_target['sres']: size regression label
-        '''
-        cls_label = self.assign_proposal_target(batch_dict, proposals)
+    # def assign_targets(self, batch_dict, proposals, rois):
+    #     '''
+    #     :return:
+    #         batch_target['cls_label']: assigned targets for classification of proposals
+    #         batch_target['point_label']: assigned targets for point segmentation
+    #         batch_target['center_label']: center regression label
+    #         batch_target['hclass']: assigned head label for box regression
+    #         batch_target['hres']: head regression label
+    #         batch_target['sclass']: assigned size label for box regression
+    #         batch_target['sres']: size regression label
+    #     '''
+    #     cls_label = self.assign_proposal_target(batch_dict, proposals)
+    #
+    #     point_label = self.assign_seg_target(rois)
+    #
+    #     center_label = batch_dict['gt_boxes'][:3]
+    #     boxsize = batch_dict['gt_boxes'][3:6]
+    #     heading = batch_dict['gt_boxes'][-1]
+    #
+    #     size_class = 0
+    #     size_residual = boxsize - self.g_type_mean_size['Car']
+    #
+    #     angle = heading % (2 * np.pi)
+    #     assert (angle >= 0 and angle <= 2 * np.pi)
+    #     angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
+    #     shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
+    #     heading_class = int(shifted_angle / angle_per_class)
+    #     heading_residual = shifted_angle - (heading_class * angle_per_class + angle_per_class / 2)
+    #
+    #     target_dict = {
+    #         'cls_label': cls_label,
+    #         'point_label': point_label,
+    #         'center_label': center_label,
+    #         'hclass': heading_class,
+    #         'hres': heading_residual,
+    #         'sclass': size_class,
+    #         'size': size_residual
+    #     }
+    #     return target_dict
 
-        point_label = self.assign_seg_target(rois)
+    # def assign_proposal_target(self, batch_data, anchor):
+    #
+    #     label = np.empty((len(batch_data),), dtype=np.int32)
+    #     label.fill(-1)
+    #     argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(anchor, batch_data['gt_box'])
+    #     label[max_ious < self.neg_iou_thresh] = 0
+    #     label[gt_argmax_ious] = 1
+    #     label[max_ious >= self.pos_iou_thresh] = 1
+    #
+    #     n_pos = int(self.pos_ratio * self.n_sample)
+    #     pos_index = np.where(label == 1)[0]
+    #     if len(pos_index) > n_pos:
+    #         disable_index = np.random.choice(
+    #             pos_index, size=(len(pos_index) - n_pos), replace=False)
+    #         label[disable_index] = -1
+    #
+    #     n_neg = self.n_sample - np.sum(label == 1)
+    #     neg_index = np.where(label == 0)[0]
+    #     if len(neg_index) > n_neg:
+    #         disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
+    #         label[disable_index] = -1
+    #     return label
 
-        center_label = batch_dict['gt_boxes'][:3]
-        boxsize = batch_dict['gt_boxes'][3:6]
-        heading = batch_dict['gt_boxes'][-1]
-
-        size_class = 0
-        size_residual = boxsize - self.g_type_mean_size['Car']
-
-        angle = heading % (2 * np.pi)
-        assert (angle >= 0 and angle <= 2 * np.pi)
-        angle_per_class = 2 * np.pi / float(NUM_HEADING_BIN)
-        shifted_angle = (angle + angle_per_class / 2) % (2 * np.pi)
-        heading_class = int(shifted_angle / angle_per_class)
-        heading_residual = shifted_angle - (heading_class * angle_per_class + angle_per_class / 2)
-
-        target_dict = {
-            'cls_label': cls_label,
-            'point_label': point_label,
-            'center_label': center_label,
-            'hclass': heading_class,
-            'hres': heading_residual,
-            'sclass': size_class,
-            'size': size_residual
-        }
-        return target_dict
-
-    def assign_proposal_target(self, batch_data, anchor):
-
-        label = np.empty((len(batch_data),), dtype=np.int32)
-        label.fill(-1)
-        argmax_ious, max_ious, gt_argmax_ious = self._calc_ious(anchor, batch_data['gt_box'])
-        label[max_ious < self.neg_iou_thresh] = 0
-        label[gt_argmax_ious] = 1
-        label[max_ious >= self.pos_iou_thresh] = 1
-
-        n_pos = int(self.pos_ratio * self.n_sample)
-        pos_index = np.where(label == 1)[0]
-        if len(pos_index) > n_pos:
-            disable_index = np.random.choice(
-                pos_index, size=(len(pos_index) - n_pos), replace=False)
-            label[disable_index] = -1
-
-        n_neg = self.n_sample - np.sum(label == 1)
-        neg_index = np.where(label == 0)[0]
-        if len(neg_index) > n_neg:
-            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
-            label[disable_index] = -1
-        return label
-
-    def _calc_ious(self, anchor, bbox):
-        #bbox = torch.from_numpy(bbox).float().cuda()
+    @staticmethod
+    def _calc_ious(anchor, bbox):
+        # bbox = torch.from_numpy(bbox).float().cuda()
         ious = boxes_iou3d_gpu(anchor, bbox)  # (N,K)
         argmax_ious = ious.argmax(axis=1)
         max_ious = ious[np.arange(anchor.size()[0]), argmax_ious]  # [1,N]
         gt_argmax_ious = ious.argmax(axis=0)
         gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
-        gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
+        gt_argmax_ious = np.where(ious == gt_max_ious)[0]  # K
         return max_ious, gt_argmax_ious
 
-    def assign_seg_target(self, batch_data):
+    @staticmethod
+    def assign_seg_target(batch_data):
         batch_size = batch_data['batch_size']
         points = batch_data['points'][:, :3, :].swapaxes(2, 1)
         n_pts = points.shape[1]
-        #bs_idx = points[:, 0]
+        # bs_idx = points[:, 0]
         gt_boxes = batch_data['gt_boxes']
-        #point_cls_labels = points.new_zeros(points.shape[0]).long()
+        # point_cls_labels = points.new_zeros(points.shape[0]).long()
         point_cls_labels = points.new_zeros(batch_size * n_pts).long()
         for k in range(batch_size):
             # bs_mask = (bs_idx == k)
@@ -737,19 +747,13 @@ class PointNetDetector(nn.Module):
         return point_cls_labels
 
     def point_cloud_masking(self, data_dict, xyz_only=True):
-        '''
-        :param pts: bs,c,n in frustum
-        :param logits: bs,n,2
-        :param xyz_only: bool
-        :return:
-        '''
         pts = data_dict['points']
         logits = data_dict['seg_logits']
         bs = pts.shape[0]
         n_pts = pts.shape[2]
         # Binary Classification for each point
-        mask = logits[:, :, 0] < logits[:, :, 1]  # (bs, n)
-        mask = mask.unsqueeze(1).float()  # (bs, 1, n)
+        masks = float(logits[:, :, 0] < logits[:, :, 1])  # (bs, n)
+        mask = torch.tensor(masks).unsqueeze(1)  # (bs, 1, n)
         mask_count = mask.sum(2, keepdim=True).repeat(1, 3, 1)  # (bs, 3, 1)
         pts_xyz = pts[:, :3, :]  # (bs,3,n)
         mask_xyz_mean = (mask.repeat(1, 3, 1) * pts_xyz).sum(2, keepdim=True)  # (bs, 3, 1)
@@ -769,15 +773,16 @@ class PointNetDetector(nn.Module):
         data_dict.update({'center': mask_xyz_mean.squeeze()})
         return data_dict
 
-    def gather_object_pts(self, pts, mask, n_pts):
-        '''
+    @staticmethod
+    def gather_object_pts(pts, mask, n_pts):
+        """
         :param pts: (bs,c,1024)
         :param mask: (bs,1024)
         :param n_pts: max number of points of an object
         :return:
             object_pts:(bs,c,n_pts)
             indices:(bs,n_pts)
-        '''
+        """
         bs = pts.shape[0]
         indices = torch.zeros((bs, n_pts), dtype=torch.int64)  # (bs, 512)
         object_pts = torch.zeros((bs, pts.shape[1], n_pts))
@@ -796,7 +801,7 @@ class PointNetDetector(nn.Module):
                 np.random.shuffle(choice)  # (512,)
                 indices[i, :] = pos_indices[choice]
                 object_pts[i, :, :] = pts[i, :, indices[i, :]]
-            ###else?
+            # else?
         return object_pts, indices
 
     # @torch.no_grad()
