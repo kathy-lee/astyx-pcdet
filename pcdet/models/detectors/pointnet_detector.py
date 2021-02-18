@@ -634,16 +634,17 @@ class PointNetDetector(nn.Module):
             elif max_ious < neg_iou_thresh:
                 label[i] = 0
 
+        # sample positive labels if too many
         n_pos = int(pos_ratio * n_sample)
         pos_index = np.where(label == 1)[0]
         if len(pos_index) > n_pos:
-            disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
+            disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos.item()), replace=False)
             label[disable_index] = -1
-
+        # sample negative labels if too many
         n_neg = n_sample - torch.sum(label == 1)
         neg_index = np.where(label == 0)[0]
         if len(neg_index) > n_neg:
-            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg), replace=False)
+            disable_index = np.random.choice(neg_index, size=(len(neg_index) - n_neg.item()), replace=False)
             label[disable_index] = -1
         return label
 
