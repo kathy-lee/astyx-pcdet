@@ -490,6 +490,12 @@ class PointNetDetector(nn.Module):
         # rewrite forward using proposal as batch data
         feature_dict = self.PointCls(batch_dict['points'])
         rois = self.get_rois(batch_dict, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        if not rois:
+            tb_dict = {}
+            disp_dict = {}
+            ret_dict = {'loss': torch.FloatTensor([0])}
+            return ret_dict, tb_dict, disp_dict
+
         rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
         rois = self.point_cloud_masking(rois)  # add rois{'center'}
         rois = self.CenterReg(rois)  # update rois{'center'} and {'pts'}
@@ -852,7 +858,7 @@ class PointNetDetector(nn.Module):
 
         proposals.update(features)
         indices = [index for index, value in enumerate(proposals['cls_pred'][:, 1]) if value == 1]
-        indices = [0, 1]
+        # indices = [0, 1]
         # print(indices)
         rois = {}
         if indices:
