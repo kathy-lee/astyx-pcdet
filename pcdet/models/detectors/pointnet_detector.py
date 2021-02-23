@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -521,8 +522,8 @@ class PointNetDetector(nn.Module):
             }
             return ret_dict, tb_dict, disp_dict
         else:
-            pred_dicts, recall_dicts = self.post_processing(batch_dict)
-            return pred_dicts, recall_dicts
+            # pred_dicts, recall_dicts = self.post_processing(batch_dict)
+            return rois
 
     def assign_targets2(self, batch_dict, rois):
         cls_label = self.assign_proposal_target2(batch_dict)
@@ -881,3 +882,31 @@ class PointNetDetector(nn.Module):
 
     def update_global_step(self):
         self.global_step += 1
+
+    def load_params_from_file(self, filename, logger, to_cpu=False):
+        if not os.path.isfile(filename):
+            raise FileNotFoundError
+
+        logger.info('==> Loading parameters from checkpoint %s to %s' % (filename, 'CPU' if to_cpu else 'GPU'))
+        loc_type = torch.device('cpu') if to_cpu else None
+        checkpoint = torch.load(filename, map_location=loc_type)
+        model_state_disk = checkpoint['model_state']
+
+        if 'version' in checkpoint:
+            logger.info('==> Checkpoint trained from version: %s' % checkpoint['version'])
+
+        update_model_state = {}
+        for key, val in model_state_disk.items():
+            if key in self.state_dict() and self.state_dict()[key].shape == model_state_disk[key].shape:
+                update_model_state[key] = val
+                # logger.info('Update weight %s: %s' % (key, str(val.shape)))
+
+        state_dict = self.state_dict()
+        state_dict.update(update_model_state)
+        self.load_state_dict(state_dict)
+
+        for key in state_dict:
+            if key not in update_model_state:
+                logger.info('Not updated weight %s: %s' % (key, str(state_dict[key].shape)))
+
+        logger.info('==> Done (loaded %d/%d)' % (len(update_model_state), len(self.state_dict())))
