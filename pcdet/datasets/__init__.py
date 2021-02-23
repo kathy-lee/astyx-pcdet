@@ -89,7 +89,7 @@ def build_proposal_dataloader(anchor_cfg, dataset_cfg, class_names, batch_size, 
         logger=logger,
     )
     # dataset = generate_proposals(anchor_cfg, pc_dataset)
-    dataset = Proposal(pc_dataset, anchor_cfg)
+    dataset = Proposal(pc_dataset, anchor_cfg, class_names)
     if merge_all_iters_to_one_epoch:
         assert hasattr(dataset, 'merge_all_iters_to_one_epoch')
         dataset.merge_all_iters_to_one_epoch(merge=True, epochs=total_epochs)
@@ -158,11 +158,12 @@ def build_proposal_dataloader(anchor_cfg, dataset_cfg, class_names, batch_size, 
 
 
 class Proposal(torch_data.Dataset):
-    def __init__(self, pcdata=None, anchor_cfg=None):
+    def __init__(self, pcdata=None, anchor_cfg=None, class_names=None):
         super().__init__()
         self.pcdata = pcdata
         self.anchor_cfg = anchor_cfg
         self.proposalset = self.generate_proposal()
+        self.class_names = class_names
 
     def __getitem__(self, index):
         return self.proposalset[index]
@@ -172,10 +173,6 @@ class Proposal(torch_data.Dataset):
 
     @staticmethod
     def collate_batch(batch_list, _unused=False):
-        print(len(batch_list))
-        print(batch_list[0]['frame_id'])
-        print(batch_list[0]['gt_boxes'])
-        print(batch_list[0]['points'].shape)
         data_dict = defaultdict(list)
         for cur_sample in batch_list:
             for key, val in cur_sample.items():
@@ -194,9 +191,6 @@ class Proposal(torch_data.Dataset):
                     # ret[key] = np.concatenate(coors, axis=0)
                     ret[key] = np.array(val)
                 elif key in ['gt_boxes']:
-                    # print('gt_boxes:%d' % len(val))
-                    # for i in range(len(val)):
-                    #     print(type(val[i]))
                     max_gt = max([len(x) for x in val])
                     batch_gt_boxes3d = np.zeros((batch_size, max_gt, val[0].shape[-1]), dtype=np.float32)
                     for k in range(batch_size):
@@ -223,7 +217,7 @@ class Proposal(torch_data.Dataset):
         batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, n_pt_proposal, 4])
         batch_frame_id = [None]*n_ac * n_pt * n_pc
         batch_gt_boxes = [None]*n_ac * n_pt * n_pc
-        for m in range(4):  # n_pc
+        for m in range(n_pc):  # n_pc
             pc_info = self.pcdata[m]
             pts = pc_info['points']
             gt_boxes = pc_info['gt_boxes']
