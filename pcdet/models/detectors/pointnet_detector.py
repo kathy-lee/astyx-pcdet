@@ -243,14 +243,41 @@ class BoxRegNet(nn.Module):
         # print(expand_global_feat.size())
         x = F.relu(self.fcbn1(self.fc1(expand_global_feat)))  # bs,512
         x = F.relu(self.fcbn2(self.fc2(x)))  # bs,256
-        box_pred = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
+        box_reg = self.fc3(x)  # bs,3+NUM_HEADING_BIN*2+NUM_SIZE_CLUSTER*4
 
-        center_delta = box_pred[:, :3]
+        center_delta = box_reg[:, :3]
         center = data_dict['center']
         data_dict.update({'center_last': center})
         data_dict.update({'center': center + center_delta})
-        data_dict.update({'box_reg': box_pred})
+        data_dict.update({'box_reg': box_reg})
+
+        _, head_scores, head_res_norm, head_res, size_scores, size_res_norm, size_res = self.parse_to_tensors(box_reg)
+        heading_class = torch.argmax(head_scores, 1)
+        heading_residual = torch.tensor([head_res[i, heading_class[i]] for i in range(bs)])
+        size_class = torch.argmax(size_scores, 1)
+        size_residual = torch.vstack([size_res[i, size_class[i], :] for i in range(bs)])
+        box_pred = torch.zeros(bs, 7)
+        g_type_size = self.g_type_mean_size.cuda()
+        for i in range(bs):
+            heading_angle = self.class2angle(heading_class[i], heading_residual[i], NUM_HEADING_BIN)
+            # box_size = self.class2size(size_class[i], size_residual[i])
+            box_size = g_type_size[size_class[i]] + size_residual[i]
+            # corners_3d = get_3d_box(box_size, heading_angle, center_pred[i])
+            box_pred[i] = torch.tensor([*center[i], *box_size, heading_angle])
+        data_dict.update({'box_pred': box_pred})
         return data_dict
+
+    @staticmethod
+    def class2angle(pred_cls, residual, num_class, to_label_format=True):
+        """ Inverse function to angle2class.
+        If to_label_format, adjust angle to the range as in labels.
+        """
+        angle_per_class = 2 * np.pi / float(num_class)
+        angle_center = pred_cls * angle_per_class
+        angle = angle_center + residual
+        if to_label_format and angle > np.pi:
+            angle = angle - 2 * np.pi
+        return angle
 
     @staticmethod
     def huber_loss(error, delta=1.0):  # (32,), ()
@@ -492,10 +519,16 @@ class PointNetDetector(nn.Module):
         feature_dict = self.PointCls(batch_dict['points'])
         rois = self.get_rois(batch_dict, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
         if not rois:
-            tb_dict = {}
-            disp_dict = {}
-            ret_dict = {'loss': torch.FloatTensor([0])}
-            return ret_dict, tb_dict, disp_dict
+            if self.training:
+                tb_dict = {}
+                disp_dict = {}
+                ret_dict = {'loss': torch.FloatTensor([0])}
+                return ret_dict, tb_dict, disp_dict
+            else:
+                tb_dict = {}
+                disp_dict = {}
+                ret_dict = {}
+                return ret_dict, tb_dict, disp_dict
 
         rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
         rois = self.point_cloud_masking(rois)  # add rois{'center'}
@@ -523,7 +556,10 @@ class PointNetDetector(nn.Module):
             return ret_dict, tb_dict, disp_dict
         else:
             # pred_dicts, recall_dicts = self.post_processing(batch_dict)
-            return rois
+            tb_dict = {}
+            disp_dict = {}
+            ret_dict = rois
+            return ret_dict, tb_dict, disp_dict
 
     def assign_targets2(self, batch_dict, rois):
         cls_label = self.assign_proposal_target2(batch_dict)
