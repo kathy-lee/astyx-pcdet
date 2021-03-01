@@ -207,11 +207,11 @@ class Proposal(torch_data.Dataset):
 
     def generate_proposal(self):
         [dx, dy, dz] = self.anchor_cfg[0]['anchor_sizes'][0]  # only car target
-        dx *= 2
-        dy *= 2
+        dx *= 1
+        dy *= 1
         n_pt = 1024  # read from data_cfg
         n_pc = len(self.pcdata)
-        n_ac = 1  # 18
+        n_ac = 18
         n_pt_proposal = 129
         batch_proposal_pose = np.empty([n_ac * n_pt * n_pc, 7])
         batch_proposal_pts = np.empty([n_ac * n_pt * n_pc, n_pt_proposal, 4])
@@ -233,26 +233,28 @@ class Proposal(torch_data.Dataset):
                     [xc + dy / 4, yc + dx / 4], [xc + dy / 4, yc - dx / 4], [xc - dy / 4, yc + dx / 4],
                     [xc - dy / 4, yc - dx / 4]
                 ])
-                centers_xy = np.array([xc, yc])
+                # centers_xy = np.array([xc, yc])
                 poses = np.zeros([n_ac, 7])
                 poses[:, :2] = centers_xy
                 poses[:, 2:6] = np.array([zc, dx, dy, dz])
                 poses[9:, -1] = np.pi / 2
                 corners3d = boxes_to_corners_3d(poses)
-                for k in range(len(poses)):
+                for k in range(n_ac):
                     flag = in_hull(pts[:, 1:4], corners3d[k])
                     idx = [i for i, x in enumerate(flag) if x == 1]
                     idx_sample = np.random.choice(idx, n_pt_proposal, replace=True)  # move to model_cfg later
-                    batch_proposal_pts[m * n_pt + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
-                    batch_proposal_pose[m * n_pt + n * n_ac + k, :] = poses[k]
-                    batch_frame_id[m * n_pt + n * n_ac + k] = frame_id
-                    batch_gt_boxes[m * n_pt + n * n_ac + k] = gt_boxes
+                    batch_proposal_pts[m * n_pt * n_ac + n * n_ac + k, :, :] = pts[idx_sample, 1:5]
+                    batch_proposal_pose[m * n_pt * n_ac + n * n_ac + k, :] = poses[k]
+                    batch_frame_id[m * n_pt * n_ac + n * n_ac + k] = frame_id
+                    batch_gt_boxes[m * n_pt * n_ac + n * n_ac + k] = gt_boxes
+
         batch_proposal_pts = batch_proposal_pts.swapaxes(2, 1)
         # proposals = {
         #     'frame_id': batch_frame_id,
         #     'pos': batch_proposal_pose,
         #     'points': batch_proposal_pts
         # }
+        print('Training dataset size:')
         print(len(batch_frame_id), batch_proposal_pts.shape, batch_proposal_pose.shape, len(batch_gt_boxes))
         proposals = [{'frame_id': batch_frame_id[i],
                       'pos': batch_proposal_pose[i, :],
