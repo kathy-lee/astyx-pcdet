@@ -246,8 +246,11 @@ class AstyxDataset(DatasetTemplate):
     def create_groundtruth_database(self, info_path=None, used_classes=None, split='train'):
         import torch
 
-        database_save_path = Path(self.root_path) / ('gt_database' if split == 'train' else ('gt_database_%s' % split))
-        db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s.pkl' % split)
+        # database_save_path = Path(self.root_path) / ('gt_database' if split == 'train' else ('gt_database_%s' % split))
+        # db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s.pkl' % split)
+        database_save_path = Path(self.root_path) / (('gt_database_%s' % self.pc_type) if split == 'train'
+                                                     else ('gt_database_%s_%s' % (split, self.pc_type)))
+        db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s_%s.pkl' % (split, self.pc_type))
 
         database_save_path.mkdir(parents=True, exist_ok=True)
         all_db_infos = {}
@@ -480,10 +483,14 @@ def create_astyx_infos(dataset_cfg, class_names, data_path, save_path, workers=4
     dataset = AstyxDataset(dataset_cfg=dataset_cfg, class_names=class_names, root_path=data_path, training=False)
     train_split, val_split = 'train', 'val'
 
-    train_filename = save_path / ('astyx_infos_%s.pkl' % train_split)
-    val_filename = save_path / ('astyx_infos_%s.pkl' % val_split)
-    trainval_filename = save_path / 'astyx_infos_trainval.pkl'
-    test_filename = save_path / 'astyx_infos_test.pkl'
+    # train_filename = save_path / ('astyx_infos_%s.pkl' % train_split)
+    # val_filename = save_path / ('astyx_infos_%s.pkl' % val_split)
+    # trainval_filename = save_path / 'astyx_infos_trainval.pkl'
+    # test_filename = save_path / 'astyx_infos_test.pkl'
+    train_filename = save_path / ('astyx_infos_%s_%s.pkl' % (train_split, dataset.pc_type))
+    val_filename = save_path / ('astyx_infos_%s_%s.pkl' % (val_split, dataset.pc_type))
+    trainval_filename = save_path / ('astyx_infos_trainval_%s.pkl' % dataset.pc_type)
+    test_filename = save_path / ('astyx_infos_test_%s.pkl' % dataset.pc_type)
 
     print('---------------Start to generate data infos---------------')
     print(f'point cloud type: %s' % dataset.pc_type)
