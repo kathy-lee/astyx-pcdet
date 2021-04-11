@@ -86,7 +86,10 @@ class AstyxDataset(DatasetTemplate):
         elif pc_type == 'radar':
             radar_file = self.root_split_path / 'radar_6455' / ('%s.txt' % idx)
             assert radar_file.exists()
-            return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 4))
+            #return np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3, 4))
+            pc = np.loadtxt(str(radar_file), dtype=np.float32, skiprows=2, usecols=(0, 1, 2, 3, 4))
+            pc[:, -1] -= 45
+            return pc
         else:
             pass
 
@@ -243,8 +246,11 @@ class AstyxDataset(DatasetTemplate):
     def create_groundtruth_database(self, info_path=None, used_classes=None, split='train'):
         import torch
 
-        database_save_path = Path(self.root_path) / ('gt_database' if split == 'train' else ('gt_database_%s' % split))
-        db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s.pkl' % split)
+        # database_save_path = Path(self.root_path) / ('gt_database' if split == 'train' else ('gt_database_%s' % split))
+        # db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s.pkl' % split)
+        database_save_path = Path(self.root_path) / (('gt_database_%s' % self.pc_type) if split == 'train'
+                                                     else ('gt_database_%s_%s' % (split, self.pc_type)))
+        db_info_save_path = Path(self.root_path) / ('astyx_dbinfos_%s_%s.pkl' % (split, self.pc_type))
 
         database_save_path.mkdir(parents=True, exist_ok=True)
         all_db_infos = {}
@@ -438,7 +444,6 @@ class AstyxDataset(DatasetTemplate):
             'frame_id': sample_idx,
             'calib': calib,
         }
-
         if 'annos' in info:
             annos = info['annos']
             # ##################################################################
@@ -462,9 +467,15 @@ class AstyxDataset(DatasetTemplate):
             if road_plane is not None:
                 input_dict['road_plane'] = road_plane
 
+        # print('%%%%%%%%%%%%%%%%%%%%%%%% Before prepare_data ')
+        # print(input_dict['points'].shape)
+        # print(input_dict['points'][:10, :])
         data_dict = self.prepare_data(data_dict=input_dict)
 
         data_dict['image_shape'] = img_shape
+        # print('%%%%%%%%%%%%%%%%%%%%%%%% After prepare_data ')
+        # print(data_dict['points'].shape)
+        # print(data_dict['points'][:10, :])
         return data_dict
 
 
@@ -472,12 +483,17 @@ def create_astyx_infos(dataset_cfg, class_names, data_path, save_path, workers=4
     dataset = AstyxDataset(dataset_cfg=dataset_cfg, class_names=class_names, root_path=data_path, training=False)
     train_split, val_split = 'train', 'val'
 
-    train_filename = save_path / ('astyx_infos_%s.pkl' % train_split)
-    val_filename = save_path / ('astyx_infos_%s.pkl' % val_split)
-    trainval_filename = save_path / 'astyx_infos_trainval.pkl'
-    test_filename = save_path / 'astyx_infos_test.pkl'
+    # train_filename = save_path / ('astyx_infos_%s.pkl' % train_split)
+    # val_filename = save_path / ('astyx_infos_%s.pkl' % val_split)
+    # trainval_filename = save_path / 'astyx_infos_trainval.pkl'
+    # test_filename = save_path / 'astyx_infos_test.pkl'
+    train_filename = save_path / ('astyx_infos_%s_%s.pkl' % (train_split, dataset.pc_type))
+    val_filename = save_path / ('astyx_infos_%s_%s.pkl' % (val_split, dataset.pc_type))
+    trainval_filename = save_path / ('astyx_infos_trainval_%s.pkl' % dataset.pc_type)
+    test_filename = save_path / ('astyx_infos_test_%s.pkl' % dataset.pc_type)
 
     print('---------------Start to generate data infos---------------')
+    print(f'point cloud type: %s' % dataset.pc_type)
 
     dataset.set_split(train_split)
     astyx_infos_train = dataset.get_infos(num_workers=workers, has_label=True, count_inside_pts=True)

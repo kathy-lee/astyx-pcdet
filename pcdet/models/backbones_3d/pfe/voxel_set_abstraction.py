@@ -142,7 +142,9 @@ class VoxelSetAbstraction(nn.Module):
 
                 if sampled_points.shape[1] < self.model_cfg.NUM_KEYPOINTS:
                     empty_num = self.model_cfg.NUM_KEYPOINTS - sampled_points.shape[1]
-                    cur_pt_idxs[0, -empty_num:] = cur_pt_idxs[0, :empty_num]
+                    pt_idxs = cur_pt_idxs.clone()
+                    cur_pt_idxs[0, -empty_num:] = pt_idxs[0, :empty_num]
+                    # cur_pt_idxs[0, -empty_num:] = cur_pt_idxs[0, :empty_num]
 
                 keypoints = sampled_points[0][cur_pt_idxs[0]].unsqueeze(dim=0)
 

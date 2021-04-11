@@ -21,7 +21,16 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             dataloader_iter = iter(train_loader)
             batch = next(dataloader_iter)
             print('new iters')
-
+        # print('**********************batch_dict info*********************')
+        # for key, value in batch.items():
+        #     print(key)
+        #     if key == 'batch_size' or key == 'frame_id':
+        #         print(value)
+        #     else:
+        #         print(value.shape)
+        #     # if key != 'points':
+        #     #     print(value)
+        # print('**********************************************************')
         lr_scheduler.step(accumulated_iter)
 
         try:
@@ -32,14 +41,38 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
         if tb_log is not None:
             tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
 
-        model.train()
-        optimizer.zero_grad()
+        # model.train()
+        # optimizer.zero_grad()
+        #
+        # loss, tb_dict, disp_dict = model_func(model, batch)
+        #
+        # loss.backward()
+        # clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+        # optimizer.step()
 
-        loss, tb_dict, disp_dict = model_func(model, batch)
+        # check detection anomal
+        # with torch.autograd.set_detect_anomaly(True):
+        #     model.train()
+        #     optimizer.zero_grad()
+        #
+        #     loss, tb_dict, disp_dict = model_func(model, batch)
+        #
+        #     loss.backward()
+        #     clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+        #     optimizer.step()
 
-        loss.backward()
-        clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
-        optimizer.step()
+        # customize backward
+        with torch.autograd.set_detect_anomaly(True):
+            model.train()
+            optimizer.zero_grad()
+
+            loss, tb_dict, disp_dict = model_func(model, batch)
+
+            if loss > 0:
+                loss.backward()
+                clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+                optimizer.step()
+
 
         accumulated_iter += 1
         disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
