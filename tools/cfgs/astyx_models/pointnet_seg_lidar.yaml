@@ -1,7 +1,7 @@
 CLASS_NAMES: ['Car', 'Pedestrian', 'Cyclist']
 
 DATA_CONFIG:
-    _BASE_CONFIG_: cfgs/dataset_configs/astyx_dataset.yaml
+    _BASE_CONFIG_: cfgs/dataset_configs/astyx_dataset_lidar.yaml
 
     DATA_PROCESSOR:
         -   NAME: mask_points_and_boxes_outside_range
