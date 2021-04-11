@@ -218,7 +218,7 @@ class BoxRegNet(nn.Module):
 
         self.g_type_mean_size = torch.tensor([[3.88311640418, 1.62856739989, 1.52563191462],
                                               [0.84422524, 0.66068622, 1.76255119],
-                                              [1.76282397, 0.59706367, 1.73698127]])
+                                              [1.76282397, 0.59706367, 1.73698127]])  # Car, Ped, Cyc
 
     def forward(self, data_dict):  # bs,3,m
         """
@@ -518,16 +518,20 @@ class PointNetDetector(nn.Module):
         # rewrite forward using proposal as batch data
         feature_dict = self.PointCls(batch_dict['points'])
         rois = self.get_rois(batch_dict, feature_dict)  # rois{'pts', 'frame_id', 'pos', 'feature_loc', 'feature_glob', 'cls_pred', 'cls_logits'}
+        tb_dict = {}
+        disp_dict = {}
+        ret_dict = {}
         if not rois:
             if self.training:
-                tb_dict = {}
-                disp_dict = {}
-                ret_dict = {'loss': torch.FloatTensor([0])}
+                # ret_dict = {'loss': torch.FloatTensor([0])}
+                cls_label = self.assign_proposal_target2(batch_dict)
+                # print('training has no rois:')
+                # print(cls_label)
+                loss = self.PointCls.get_loss(feature_dict['cls_logits'], cls_label.cuda())
+                ret_dict.update({'loss': loss})
                 return ret_dict, tb_dict, disp_dict
             else:
-                tb_dict = {}
-                disp_dict = {}
-                ret_dict = {}
+                print('evaluation has no rois')
                 return ret_dict, tb_dict, disp_dict
 
         rois = self.PointSeg(rois)  # add rois{'seg_logits'}, deleted rois{'feature_loc', 'feature_glob'}
@@ -548,16 +552,11 @@ class PointNetDetector(nn.Module):
             box_reg_loss = self.BoxReg.get_loss(rois['center'], batch_target, rois['box_reg'])
 
             loss = cls_loss + seg_loss_weight * seg_loss + box_loss_weight * (center_reg_loss + box_reg_loss)
-            tb_dict = {}
-            disp_dict = {}
-            ret_dict = {
-                'loss': loss
-            }
+            ret_dict.update({'loss': loss})
             return ret_dict, tb_dict, disp_dict
         else:
+            print('evaluation has rois')
             # pred_dicts, recall_dicts = self.post_processing(batch_dict)
-            tb_dict = {}
-            disp_dict = {}
             ret_dict = rois
             return ret_dict, tb_dict, disp_dict
 
@@ -574,7 +573,8 @@ class PointNetDetector(nn.Module):
         pi = torch.acos(torch.zeros(1)).item() * 2
         for i in range(rois['batch_size']):
             # rois[i] with best matched gt box [k]
-            k = 0
+            pos = torch.unsqueeze(rois['pos'][i], 0)
+            _, k = self._calc_ious(pos, rois['gt_boxes'][i, :, :7])
             center_label[i, :] = rois['gt_boxes'][i, k, :3]
             box_size = rois['gt_boxes'][i, k, 3:6]
             heading = rois['gt_boxes'][i, k, 6]
@@ -659,21 +659,25 @@ class PointNetDetector(nn.Module):
         }
         return target_dict
 
-    def assign_proposal_target2(self, batch_data, n_sample=2, pos_iou_thresh=0.7, neg_iou_thresh=0.3, pos_ratio=0.5):
-        poses = batch_data['pos']
-        gt_boxes = batch_data['gt_boxes'][:, :, :7]
+    def assign_proposal_target2(self, batch_data, n_sample=16, pos_iou_thresh=0.5, neg_iou_thresh=0.3, pos_ratio=0.5):
+        bs = batch_data['batch_size']
+        # poses = batch_data['pos']
+        # gt_boxes = batch_data['gt_boxes'][:, :, :7]
 
-        label = -torch.ones([len(poses)], dtype=torch.long)
+        label = -torch.ones([bs], dtype=torch.long)
         # max_ious, gt_argmax_ious = self._calc_ious(poses, gt_boxes)
         # label[max_ious < neg_iou_thresh] = 0
         # label[gt_argmax_ious] = 1
         # label[max_ious >= pos_iou_thresh] = 1
-        for i in range(len(poses)):
-            pos = torch.unsqueeze(poses[i], 0)
+        for i in range(bs):
+            pos = torch.unsqueeze(batch_data['pos'][i], 0)
             # pos = poses[i][np.newaxis, :]
-            max_ious, gt_argmax_ious = self._calc_ious(pos, gt_boxes[i])
+            max_ious, gt_argmax_ious = self._calc_ious(pos, batch_data['gt_boxes'][i, :, :7])
+            if max_ious >= 0.5:
+                print(max_ious)
             if max_ious >= pos_iou_thresh:
-                label[i] = 1
+                # label[i] = 1
+                label[i] = batch_data['gt_boxes'][i, gt_argmax_ious, -1] - 1
             elif max_ious < neg_iou_thresh:
                 label[i] = 0
 
@@ -681,7 +685,7 @@ class PointNetDetector(nn.Module):
         n_pos = int(pos_ratio * n_sample)
         pos_index = np.where(label == 1)[0]
         if len(pos_index) > n_pos:
-            disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos.item()), replace=False)
+            disable_index = np.random.choice(pos_index, size=(len(pos_index) - n_pos), replace=False)
             label[disable_index] = -1
         # sample negative labels if too many
         n_neg = n_sample - torch.sum(label == 1)
@@ -758,11 +762,12 @@ class PointNetDetector(nn.Module):
     def _calc_ious(anchor, bbox):
         # bbox = torch.from_numpy(bbox).float().cuda()
         ious = boxes_iou3d_gpu(anchor, bbox)  # (N,K)
-        argmax_ious = ious.argmax(axis=1)
-        max_ious = ious[np.arange(anchor.size()[0]), argmax_ious]  # [1,N]
-        gt_argmax_ious = ious.argmax(axis=0)
-        gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
-        gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
+        # argmax_ious = ious.argmax(axis=1)
+        # max_ious = ious[np.arange(anchor.size()[0]), argmax_ious]  # [1,N]
+        # gt_argmax_ious = ious.argmax(axis=0)
+        # gt_max_ious = ious[gt_argmax_ious, np.arange(ious.shape[1])]  # [1,K]
+        # gt_argmax_ious = torch.where(ious == gt_max_ious)[0]  # K
+        max_ious, gt_argmax_ious = torch.max(ious, dim=1)
         return max_ious, gt_argmax_ious
 
     @staticmethod
@@ -785,7 +790,7 @@ class PointNetDetector(nn.Module):
             ).long().squeeze(dim=0)
             box_fg_flag = (box_idxs_of_pts >= 0)
             fg_flag = box_fg_flag
-            gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
+            # gt_box_of_fg_points = gt_boxes[k][box_idxs_of_pts[fg_flag]]
             point_cls_labels_single[fg_flag] = 1  # if self.n_classes == 1 else gt_box_of_fg_points[:, -1].long()
             point_cls_labels[k*n_pts: (k+1)*n_pts] = point_cls_labels_single
         return point_cls_labels
