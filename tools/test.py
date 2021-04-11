@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from tensorboardX import SummaryWriter
 
-from eval_utils import eval_utils, eval_pointseg
+from eval_utils import eval_utils, eval_pointseg, eval_pointdet
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
@@ -121,6 +121,10 @@ def repeat_eval_ckpt(model, test_loader, args, eval_output_dir, logger, ckpt_dir
             cfg, model, test_loader, cur_epoch_id, logger, dist_test=dist_test,
             result_dir=cur_result_dir, save_to_file=args.save_to_file
             )
+        elif cfg.MODEL.NAME == 'PointNetDetector':
+            tb_dict = eval_pointdet.eval_one_epoch(
+                cfg, model, test_loader, cur_epoch_id, logger, dist_test=dist_test,
+                result_dir=cur_result_dir, save_to_file=args.save_to_file)
         else:
             tb_dict = eval_utils.eval_one_epoch(
             cfg, model, test_loader, cur_epoch_id, logger, dist_test=dist_test,
